@@ -20,7 +20,9 @@ listos desde el arranque.
 backend/
 ├── config/         # Configuración del proyecto (settings, urls, wsgi, asgi)
 ├── core/           # App principal (health check, permisos/roles, utilidades comunes)
+│   └── schemas.py  # Piezas OpenAPI reutilizables entre apps
 ├── users/          # App de usuarios (modelo de usuario custom por email)
+│   └── schemas.py  # Documentación OpenAPI de las views de users
 ├── manage.py
 ├── requirements.txt
 ├── Dockerfile
@@ -29,6 +31,20 @@ backend/
 
 La app `users` define un modelo de usuario custom (`users.User`) configurado
 como `AUTH_USER_MODEL`, que usa **email en lugar de username** para loguearse.
+
+## Documentación de la API
+
+La API se documenta con **drf-spectacular** (OpenAPI 3), disponible en:
+
+- `GET /api/schema/` — schema OpenAPI en YAML.
+- `GET /api/docs/` — Swagger UI.
+- `GET /api/redoc/` — Redoc.
+
+**Convención**: la documentación de cada endpoint (`@extend_schema`, ejemplos,
+respuestas) vive en un módulo `schemas.py` al lado de `views.py` de cada app,
+nunca dentro de la view — así la view queda como una sola línea de decorador
+más el código real. Piezas compartidas entre apps (respuestas de error
+comunes, etc.) van en `core/schemas.py`. Ver `users/schemas.py` como ejemplo.
 
 ## Requisitos
 
@@ -119,6 +135,7 @@ El servidor queda disponible en `http://localhost:8000`.
 - `GET /api/health/` — healthcheck público, sin autenticación.
 - `POST /api/auth/token/` — obtiene `access` y `refresh` (body: `email`, `password`).
 - `POST /api/auth/token/refresh/` — renueva el `access` token.
+- `/api/schema/`, `/api/docs/`, `/api/redoc/` — documentación OpenAPI (ver arriba).
 - `/admin/` — admin de Django.
 
 Por defecto, todos los endpoints de DRF requieren autenticación JWT

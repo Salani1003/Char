@@ -4,9 +4,16 @@ Documentación OpenAPI (drf-spectacular) de las views de `users`.
 Ver `core/schemas.py` para la convención general del proyecto: la
 documentación vive acá, no en `views.py`.
 """
-from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema, extend_schema_view
 
-__all__ = ['TOKEN_OBTAIN_SCHEMA', 'TOKEN_REFRESH_SCHEMA']
+from core.schemas import FORBIDDEN, NOT_FOUND, UNAUTHORIZED, VALIDATION_ERROR
+
+__all__ = [
+    'TOKEN_OBTAIN_SCHEMA',
+    'TOKEN_REFRESH_SCHEMA',
+    'USER_VIEWSET_SCHEMA',
+    'GROUP_VIEWSET_SCHEMA',
+]
 
 _ACCESS_TOKEN_EXAMPLE = (
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
@@ -86,4 +93,79 @@ TOKEN_REFRESH_SCHEMA = extend_schema(
     responses={
         401: OpenApiResponse(description='El token de refresco es inválido, expiró o fue revocado.'),
     },
+)
+
+USER_VIEWSET_SCHEMA = extend_schema_view(
+    list=extend_schema(
+        tags=['Users'],
+        summary='Listar usuarios',
+        description='Lista los usuarios internos. Requiere permiso `users.view_user`.',
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN},
+    ),
+    retrieve=extend_schema(
+        tags=['Users'],
+        summary='Obtener un usuario',
+        description='Requiere permiso `users.view_user`.',
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND},
+    ),
+    create=extend_schema(
+        tags=['Users'],
+        summary='Crear un usuario interno',
+        description=(
+            'Crea un usuario interno. No hay registro público: sólo un '
+            'Administrador con permiso `users.add_user` puede crear usuarios. '
+            'Los roles se asignan vía `groups`; `is_staff`/`is_superuser` son '
+            'de sólo lectura desde este endpoint.'
+        ),
+        examples=[
+            OpenApiExample(
+                'Alta de usuario',
+                value={
+                    'email': 'jane.doe@example.com',
+                    'password': 'S3curePass!',
+                    'first_name': 'Jane',
+                    'last_name': 'Doe',
+                    'groups': [1],
+                },
+                request_only=True,
+            ),
+        ],
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN, 400: VALIDATION_ERROR},
+    ),
+    update=extend_schema(
+        tags=['Users'],
+        summary='Actualizar un usuario',
+        description='Requiere permiso `users.change_user`. Permite reasignar `groups` (roles).',
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND, 400: VALIDATION_ERROR},
+    ),
+    partial_update=extend_schema(
+        tags=['Users'],
+        summary='Actualizar parcialmente un usuario',
+        description='Requiere permiso `users.change_user`. Permite reasignar `groups` (roles).',
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND, 400: VALIDATION_ERROR},
+    ),
+    destroy=extend_schema(
+        tags=['Users'],
+        summary='Eliminar un usuario',
+        description='Requiere permiso `users.delete_user`.',
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND},
+    ),
+)
+
+GROUP_VIEWSET_SCHEMA = extend_schema_view(
+    list=extend_schema(
+        tags=['Users'],
+        summary='Listar roles (Groups)',
+        description=(
+            'Lista los Groups de Django disponibles para asignar como rol a '
+            'un usuario. Requiere permiso `auth.view_group`.'
+        ),
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN},
+    ),
+    retrieve=extend_schema(
+        tags=['Users'],
+        summary='Obtener un rol (Group)',
+        description='Requiere permiso `auth.view_group`.',
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND},
+    ),
 )

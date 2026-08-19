@@ -30,4 +30,12 @@ El comando `python manage.py seed_roles` lee este diccionario y crea los
 Groups que falten, asignándoles los Permissions definidos.
 """
 
-ROLES: dict[str, list[str]] = {}
+ROLES: dict[str, list[str]] = {
+    "Administrator": [
+        "users.add_user",
+        "users.view_user",
+        "users.change_user",
+        "users.delete_user",
+        "auth.view_group",
+    ],
+}

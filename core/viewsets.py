@@ -26,3 +26,13 @@ class BaseModelViewSet(viewsets.ModelViewSet):
     """
 
     permission_classes = [DjangoObjectPermissionsWithView]
+
+    def perform_create(self, serializer):
+        serializer.save()
+        serializer.instance.set_created_by(self.request.user)
+        serializer.instance.save(update_fields=['created_by'])
+
+    def perform_update(self, serializer):
+        serializer.save()
+        serializer.instance.set_updated_by(self.request.user)
+        serializer.instance.save(update_fields=['updated_by'])

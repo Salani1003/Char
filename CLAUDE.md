@@ -73,6 +73,23 @@ backend — no bespoke role logic anywhere.
   is the single source of truth for roles; `seed_roles` management command
   syncs Groups/Permissions in the DB to match it.
 
+### BaseModel / soft delete
+
+`core/models.py` — `BaseModel` is an abstract model adding audit fields
+(`created_at`/`updated_at`, `created_by`/`updated_by`) and soft delete
+(`is_deleted`, `deleted_at`, `deleted_by`) to any model that inherits from
+it. `objects` (via `core/managers.py`'s `SoftDeleteManager`) excludes
+soft-deleted rows; `all_objects` (`AllObjectsManager`) includes everything.
+`instance.delete(user)` soft-deletes instead of removing the row;
+`instance.restore()` reverts it.
+
+`BaseModelViewSet` (`core/viewsets.py`) wires this in automatically for any
+model inheriting `BaseModel`: `perform_create`/`perform_update` set
+`created_by`/`updated_by` from `request.user` via `serializer.save(...)`,
+and `perform_destroy` calls `instance.delete(self.request.user)` — so a
+plain `DELETE` request soft-deletes and records who did it, never a
+physical `DELETE` query.
+
 ### OpenAPI docs convention
 
 Endpoint documentation (`@extend_schema`, examples, response descriptions)

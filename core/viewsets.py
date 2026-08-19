@@ -32,3 +32,6 @@ class BaseModelViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        instance.delete(self.request.user)

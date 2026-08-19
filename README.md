@@ -189,6 +189,34 @@ python manage.py seed_roles
 
 Es idempotente: correrlo de nuevo deja el mismo resultado.
 
+## BaseModel y soft delete
+
+`core.models.BaseModel` es un modelo abstracto reutilizable que agrega:
+
+- **Auditoría**: `created_at`/`updated_at` y `created_by`/`updated_by`
+  (FK a `AUTH_USER_MODEL`).
+- **Soft delete**: `is_deleted`, `deleted_at`, `deleted_by`. El manager
+  `objects` excluye los registros borrados; `all_objects` los incluye a
+  todos.
+
+```python
+from core.models import BaseModel
+
+class Widget(BaseModel):
+    name = models.CharField(max_length=100)
+
+widget = Widget.objects.create(name="Foo")
+widget.delete(user)        # soft delete, no borra la fila
+widget.restore()           # revierte el soft delete
+Widget.all_objects.all()   # incluye los borrados
+```
+
+Si el `ViewSet` del modelo hereda de `BaseModelViewSet`, esto queda
+conectado sin código adicional: `perform_create`/`perform_update` asignan
+`created_by`/`updated_by` desde `request.user`, y `perform_destroy` llama
+a `instance.delete(request.user)` — un `DELETE` por API hace soft delete
+y registra quién lo hizo, nunca un `DELETE` físico en la base.
+
 ## Tests
 
 ```bash

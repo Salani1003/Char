@@ -424,9 +424,10 @@ class AuditAssignmentTests(TestCase):
 class BaseModelViewSetAuditTests(TestCase):
     """
     Prueba de punta a punta que `BaseModelViewSet` asigna `created_by` al
-    crear y `updated_by` al modificar, usando `request.user` a través de
-    `set_created_by`/`set_updated_by` del mismo modelo concreto de prueba
-    usado en `SoftDeleteTests`.
+    crear y `updated_by` al modificar, usando `serializer.save(created_by=request.user)`
+    durante la creación y `serializer.save(updated_by=request.user)` durante la
+    actualización, sobre el mismo modelo concreto de prueba usado en
+    `SoftDeleteTests`.
     """
 
     @classmethod
@@ -545,6 +546,101 @@ class BaseModelViewSetAuditTests(TestCase):
         ]
         self.assertEqual(len(writes), 1)
         self.assertTrue(writes[0].startswith('UPDATE'))
+
+
+@isolate_apps('core')
+class BaseModelViewSetDestroyTests(TestCase):
+    """
+    Prueba de punta a punta que `BaseModelViewSet.perform_destroy` usa el
+    borrado lógico de `BaseModel` (en vez del borrado físico estándar de
+    DRF), registrando `request.user` como `deleted_by`, usando el mismo
+    modelo concreto y estrategia de autenticación de `BaseModelViewSetAuditTests`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        class ConcreteModel(BaseModel):
+            class Meta:
+                app_label = 'core'
+
+        cls.ConcreteModel = ConcreteModel
+        with connection.schema_editor() as editor:
+            editor.create_model(cls.ConcreteModel)
+
+        class ConcreteModelSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = ConcreteModel
+                fields = ['id', 'created_by', 'updated_by']
+                read_only_fields = ['created_by', 'updated_by']
+
+        class ConcreteModelViewSet(BaseModelViewSet):
+            queryset = ConcreteModel.all_objects.all()
+            serializer_class = ConcreteModelSerializer
+
+        cls.ConcreteModelViewSet = ConcreteModelViewSet
+
+    @classmethod
+    def tearDownClass(cls):
+        with connection.schema_editor() as editor:
+            editor.delete_model(cls.ConcreteModel)
+        super().tearDownClass()
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = User.objects.create_superuser(email='destroyer@example.com', password='pass12345')
+        self.instance = self.ConcreteModel.objects.create()
+
+    def _destroy(self):
+        request = self.factory.delete(f'/fake-concrete/{self.instance.pk}/')
+        force_authenticate(request, user=self.user)
+        return self.ConcreteModelViewSet.as_view({'delete': 'destroy'})(request, pk=self.instance.pk)
+
+    def test_destroy_returns_expected_drf_status(self):
+        response = self._destroy()
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_destroy_sets_is_deleted(self):
+        self._destroy()
+
+        self.instance.refresh_from_db()
+        self.assertTrue(self.instance.is_deleted)
+
+    def test_destroy_sets_deleted_at(self):
+        self._destroy()
+
+        self.instance.refresh_from_db()
+        self.assertIsNotNone(self.instance.deleted_at)
+
+    def test_destroy_sets_deleted_by_from_request_user(self):
+        self._destroy()
+
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.deleted_by, self.user)
+
+    def test_destroy_keeps_record_visible_via_all_objects(self):
+        self._destroy()
+
+        self.assertTrue(self.ConcreteModel.all_objects.filter(pk=self.instance.pk).exists())
+
+    def test_destroy_hides_record_from_objects(self):
+        self._destroy()
+
+        self.assertFalse(self.ConcreteModel.objects.filter(pk=self.instance.pk).exists())
+
+    def test_destroy_does_not_perform_physical_delete(self):
+        table = self.ConcreteModel._meta.db_table
+
+        with CaptureQueriesContext(connection) as ctx:
+            self._destroy()
+
+        physical_deletes = [
+            q['sql'] for q in ctx.captured_queries
+            if table in q['sql'] and q['sql'].strip().upper().startswith('DELETE')
+        ]
+        self.assertEqual(physical_deletes, [])
 
 
 @isolate_apps('core')

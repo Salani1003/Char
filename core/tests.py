@@ -6,7 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase
-from django.test.utils import isolate_apps
+from django.test.utils import CaptureQueriesContext, isolate_apps
 from django.utils import timezone
 from rest_framework import generics, serializers
 from rest_framework.test import APIRequestFactory, force_authenticate
@@ -512,6 +512,39 @@ class BaseModelViewSetAuditTests(TestCase):
         instance = self.ConcreteModel.all_objects.get(pk=response.data['id'])
         self.assertNotEqual(instance.created_by, other_user)
         self.assertEqual(instance.created_by, self.user)
+
+    def test_create_persists_created_by_in_a_single_write(self):
+        table = self.ConcreteModel._meta.db_table
+        request = self.factory.post('/fake-concrete/', {}, format='json')
+        force_authenticate(request, user=self.user)
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.ConcreteModelViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 201)
+        writes = [
+            q['sql'] for q in ctx.captured_queries
+            if table in q['sql'] and (q['sql'].startswith('INSERT') or q['sql'].startswith('UPDATE'))
+        ]
+        self.assertEqual(len(writes), 1)
+        self.assertTrue(writes[0].startswith('INSERT'))
+
+    def test_update_persists_updated_by_in_a_single_write(self):
+        instance = self.ConcreteModel.objects.create()
+        table = self.ConcreteModel._meta.db_table
+        request = self.factory.patch(f'/fake-concrete/{instance.pk}/', {}, format='json')
+        force_authenticate(request, user=self.user)
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.ConcreteModelViewSet.as_view({'patch': 'partial_update'})(request, pk=instance.pk)
+
+        self.assertEqual(response.status_code, 200)
+        writes = [
+            q['sql'] for q in ctx.captured_queries
+            if table in q['sql'] and (q['sql'].startswith('INSERT') or q['sql'].startswith('UPDATE'))
+        ]
+        self.assertEqual(len(writes), 1)
+        self.assertTrue(writes[0].startswith('UPDATE'))
 
 
 @isolate_apps('core')

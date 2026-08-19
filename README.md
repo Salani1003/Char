@@ -1,0 +1,143 @@
+# Char Backend
+
+Backend de Char construido con Django y Django REST Framework. Pensado como
+base reutilizable para nuevos proyectos: autenticación por email + JWT, CORS,
+healthcheck y Docker listos desde el arranque.
+
+## Stack
+
+- Python 3.12
+- Django 6.1
+- Django REST Framework + Simple JWT
+- django-cors-headers
+- PostgreSQL 18
+- Docker / Docker Compose
+- Gunicorn (producción)
+
+## Estructura del proyecto
+
+```
+backend/
+├── config/         # Configuración del proyecto (settings, urls, wsgi, asgi)
+├── core/           # App principal (health check, utilidades comunes)
+├── users/          # App de usuarios (modelo de usuario custom por email)
+├── manage.py
+├── requirements.txt
+├── Dockerfile
+└── docker-compose.yml
+```
+
+La app `users` define un modelo de usuario custom (`users.User`) configurado
+como `AUTH_USER_MODEL`, que usa **email en lugar de username** para loguearse.
+
+## Requisitos
+
+- Python 3.12+
+- PostgreSQL (o Docker, para levantar todo con Compose)
+
+## Configuración
+
+1. Copiá el archivo de variables de entorno de ejemplo:
+
+   ```bash
+   cp .env.template .env
+   ```
+
+2. Completá las variables en `.env`:
+
+   ```
+   DEBUG=True
+   SECRET_KEY=<tu-secret-key>
+
+   ALLOWED_HOSTS=localhost,127.0.0.1
+   CORS_ALLOWED_ORIGINS=http://localhost:3000
+
+   DB_NAME=char
+   DB_USER=<usuario>
+   DB_PASSWORD=<password>
+   DB_HOST=localhost
+   DB_PORT=5432
+
+   EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+   ```
+
+   Todas las variables tienen un default razonable en `config/settings.py`
+   salvo `SECRET_KEY`, `DB_USER` y `DB_PASSWORD`.
+
+## Uso con Docker (recomendado)
+
+```bash
+docker compose up --build
+```
+
+Esto levanta:
+
+- `backend`: servidor Django en `http://localhost:8000`, esperando a que
+  Postgres esté saludable y aplicando migraciones automáticamente al iniciar.
+- `db`: PostgreSQL en el puerto `5434`.
+
+`DB_HOST` se pisa a `db` dentro del contenedor, así que el mismo `.env` sirve
+tanto para Docker como para correr el proyecto en un entorno local.
+
+## Uso local (sin Docker)
+
+1. Creá y activá un entorno virtual:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Instalá las dependencias:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Aplicá las migraciones:
+
+   ```bash
+   python manage.py migrate
+   ```
+
+4. Creá un superusuario (pide **email**, no username):
+
+   ```bash
+   python manage.py createsuperuser
+   ```
+
+5. Levantá el servidor de desarrollo:
+
+   ```bash
+   python manage.py runserver
+   ```
+
+El servidor queda disponible en `http://localhost:8000`.
+
+## Endpoints
+
+- `GET /api/health/` — healthcheck público, sin autenticación.
+- `POST /api/auth/token/` — obtiene `access` y `refresh` (body: `email`, `password`).
+- `POST /api/auth/token/refresh/` — renueva el `access` token.
+- `/admin/` — admin de Django.
+
+Por defecto, todos los endpoints de DRF requieren autenticación JWT
+(`IsAuthenticated`); ajustar `permission_classes` por vista según haga falta.
+
+## Tests
+
+```bash
+python manage.py test
+```
+
+## Producción
+
+La imagen de Docker corre como usuario no-root y trae `gunicorn` en las
+dependencias. Para producción, reemplazar el `command` del servicio `backend`
+en `docker-compose.yml` (o el `CMD` del `Dockerfile`) por algo como:
+
+```bash
+gunicorn config.wsgi:application --bind 0.0.0.0:8000
+```
+
+y correr `python manage.py collectstatic` antes de servir.

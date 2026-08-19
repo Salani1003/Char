@@ -19,7 +19,7 @@ healthcheck y Docker listos desde el arranque.
 ```
 backend/
 ├── config/         # Configuración del proyecto (settings, urls, wsgi, asgi)
-├── core/           # App principal (health check, utilidades comunes)
+├── core/           # App principal (health check, permisos/roles, utilidades comunes)
 ├── users/          # App de usuarios (modelo de usuario custom por email)
 ├── manage.py
 ├── requirements.txt
@@ -123,6 +123,44 @@ El servidor queda disponible en `http://localhost:8000`.
 
 Por defecto, todos los endpoints de DRF requieren autenticación JWT
 (`IsAuthenticated`); ajustar `permission_classes` por vista según haga falta.
+
+## Roles y permisos
+
+El template usa el sistema **nativo de Django** (`django.contrib.auth`):
+`Group`, `Permission` y `user.has_perm(...)`. No hay lógica de roles
+custom — los roles son simplemente Groups con Permissions asignadas,
+administrables desde `/admin/` (o por fixture/migración de datos en cada
+proyecto que use este template).
+
+Integración con DRF en `core/permissions.py` y `core/viewsets.py`:
+
+- **`core.permissions.DjangoObjectPermissionsWithView`**: extiende
+  `DjangoObjectPermissions` de DRF para que también el `GET` (no sólo
+  escrituras) requiera el permiso `view_<modelo>`. Con esto, cada método
+  HTTP queda mapeado 1:1 a un permiso Django (`add_`/`change_`/`delete_`/`view_`),
+  chequeado contra los permisos/grupos del usuario autenticado.
+- **`core.viewsets.BaseModelViewSet`**: `ModelViewSet` base que ya trae
+  configurada esa permission class. Para exponer un modelo con permisos
+  por endpoint alcanza con:
+
+  ```python
+  from core.viewsets import BaseModelViewSet
+
+  class WidgetViewSet(BaseModelViewSet):
+      queryset = Widget.objects.all()
+      serializer_class = WidgetSerializer
+  ```
+
+**Nivel de endpoint**: funciona out-of-the-box (backend de permisos por
+defecto de Django evalúa a nivel de modelo).
+
+**Nivel de objeto**: la permission class ya llama a
+`has_object_permission` en retrieve/update/delete, delegando en
+`user.has_perm(perm, obj)`. Bajo el backend por defecto ese `obj` se
+ignora (degrada a nivel de modelo), así que no rompe nada hoy. El día
+que un proyecto derivado necesite reglas por objeto, alcanza con agregar
+un backend de permisos de objeto (p. ej. `django-guardian`) a
+`AUTHENTICATION_BACKENDS` — sin tocar código de vistas ni permisos.
 
 ## Tests
 

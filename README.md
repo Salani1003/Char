@@ -1,8 +1,8 @@
-# Char Backend
+# Backend Template
 
-Backend de Char construido con Django y Django REST Framework. Pensado como
-base reutilizable para nuevos proyectos: autenticación por email + JWT, CORS,
-healthcheck y Docker listos desde el arranque.
+Backend genérico construido con Django y Django REST Framework, pensado como
+punto de partida para cualquier proyecto nuevo: autenticación por email + JWT,
+CORS, healthcheck, roles/permisos y Docker listos desde el arranque.
 
 ## Stack
 
@@ -52,7 +52,7 @@ como `AUTH_USER_MODEL`, que usa **email en lugar de username** para loguearse.
    ALLOWED_HOSTS=localhost,127.0.0.1
    CORS_ALLOWED_ORIGINS=http://localhost:3000
 
-   DB_NAME=char
+   DB_NAME=<nombre-db>
    DB_USER=<usuario>
    DB_PASSWORD=<password>
    DB_HOST=localhost
@@ -161,6 +161,18 @@ ignora (degrada a nivel de modelo), así que no rompe nada hoy. El día
 que un proyecto derivado necesite reglas por objeto, alcanza con agregar
 un backend de permisos de objeto (p. ej. `django-guardian`) a
 `AUTHENTICATION_BACKENDS` — sin tocar código de vistas ni permisos.
+
+**Seed de roles**: `core/roles.py` define el diccionario `ROLES`
+(vacío por default), donde cada entrada es un Group con su lista de
+permisos (`"<app_label>.<codename>"`). Para crear/actualizar los Groups
+en la base de datos a partir de ese diccionario:
+
+```bash
+python manage.py seed_roles
+```
+
+Es idempotente: correrlo de nuevo deja el mismo resultado. Cada proyecto
+derivado de este template define sus propios roles completando `ROLES`.
 
 ## Tests
 

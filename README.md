@@ -1,8 +1,8 @@
-# Backend Template
+# Char Backend
 
-Backend genérico construido con Django y Django REST Framework, pensado como
-punto de partida para cualquier proyecto nuevo: autenticación por email + JWT,
-CORS, healthcheck, roles/permisos y Docker listos desde el arranque.
+Backend de **Char**, construido con Django y Django REST Framework:
+autenticación por email + JWT, CORS, healthcheck, roles/permisos y Docker
+listos desde el arranque.
 
 ## Stack
 
@@ -126,11 +126,10 @@ Por defecto, todos los endpoints de DRF requieren autenticación JWT
 
 ## Roles y permisos
 
-El template usa el sistema **nativo de Django** (`django.contrib.auth`):
+El backend usa el sistema **nativo de Django** (`django.contrib.auth`):
 `Group`, `Permission` y `user.has_perm(...)`. No hay lógica de roles
 custom — los roles son simplemente Groups con Permissions asignadas,
-administrables desde `/admin/` (o por fixture/migración de datos en cada
-proyecto que use este template).
+administrables desde `/admin/` (o por fixture/migración de datos).
 
 Integración con DRF en `core/permissions.py` y `core/viewsets.py`:
 
@@ -162,17 +161,16 @@ que un proyecto derivado necesite reglas por objeto, alcanza con agregar
 un backend de permisos de objeto (p. ej. `django-guardian`) a
 `AUTHENTICATION_BACKENDS` — sin tocar código de vistas ni permisos.
 
-**Seed de roles**: `core/roles.py` define el diccionario `ROLES`
-(vacío por default), donde cada entrada es un Group con su lista de
-permisos (`"<app_label>.<codename>"`). Para crear/actualizar los Groups
-en la base de datos a partir de ese diccionario:
+**Seed de roles**: `core/roles.py` define el diccionario `ROLES`, donde
+cada entrada es un Group con su lista de permisos
+(`"<app_label>.<codename>"`). Para crear/actualizar los Groups en la
+base de datos a partir de ese diccionario:
 
 ```bash
 python manage.py seed_roles
 ```
 
-Es idempotente: correrlo de nuevo deja el mismo resultado. Cada proyecto
-derivado de este template define sus propios roles completando `ROLES`.
+Es idempotente: correrlo de nuevo deja el mismo resultado.
 
 ## Tests
 

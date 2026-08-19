@@ -48,7 +48,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         if 'password' not in validated_data:
-            raise serializers.ValidationError({'password': 'This field is required.'})
+            raise serializers.ValidationError({'password': 'Este campo es obligatorio.'})
         password = validated_data.pop('password')
         groups = validated_data.pop('groups', [])
         user = User.objects.create_user(password=password, **validated_data)

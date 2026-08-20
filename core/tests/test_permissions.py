@@ -20,6 +20,12 @@ class _UserListCreateView(generics.ListCreateAPIView):
     permission_classes = [DjangoObjectPermissionsWithView]
 
 
+class _UserRetrieveUpdateView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = User.objects.all()
+    serializer_class = _UserSerializer
+    permission_classes = [DjangoObjectPermissionsWithView]
+
+
 class DjangoObjectPermissionsWithViewTests(TestCase):
     """
     Prueba de punta a punta la clase de permiso genérica contra una vista
@@ -73,3 +79,42 @@ class DjangoObjectPermissionsWithViewTests(TestCase):
         request = self.factory.get('/fake-users/')
         response = _UserListCreateView.as_view()(request)
         self.assertEqual(response.status_code, 401)
+
+    def test_retrieve_allowed_with_view_permission_granted_via_group(self):
+        """
+        Regresión: bajo el backend de auth por defecto (sin django-guardian),
+        `user.has_perm(perm, obj)` siempre devuelve False para un obj
+        concreto (ModelBackend.get_all_permissions ignora los permisos del
+        usuario en cuanto se le pasa un obj), así que has_object_permission
+        debe caer a un chequeo a nivel de modelo o un usuario con view_user
+        nunca podría hacer retrieve/update/destroy de ningún objeto puntual.
+        """
+        target = User.objects.create_user(email='target@example.com', password='pass12345')
+        self._grant('view_user')
+        request = self.factory.get(f'/fake-users/{target.pk}/')
+        force_authenticate(request, user=self.user)
+        response = _UserRetrieveUpdateView.as_view()(request, pk=target.pk)
+        self.assertEqual(response.status_code, 200)
+
+    def test_retrieve_denied_without_view_permission(self):
+        target = User.objects.create_user(email='target@example.com', password='pass12345')
+        request = self.factory.get(f'/fake-users/{target.pk}/')
+        force_authenticate(request, user=self.user)
+        response = _UserRetrieveUpdateView.as_view()(request, pk=target.pk)
+        self.assertEqual(response.status_code, 403)
+
+    def test_update_allowed_with_change_permission_granted_via_group(self):
+        target = User.objects.create_user(email='target@example.com', password='pass12345')
+        self._grant('change_user')
+        request = self.factory.patch(f'/fake-users/{target.pk}/', {'email': 'renamed@example.com'}, format='json')
+        force_authenticate(request, user=self.user)
+        response = _UserRetrieveUpdateView.as_view()(request, pk=target.pk)
+        self.assertEqual(response.status_code, 200)
+
+    def test_destroy_denied_without_delete_permission_but_with_view_permission(self):
+        target = User.objects.create_user(email='target@example.com', password='pass12345')
+        self._grant('view_user')
+        request = self.factory.delete(f'/fake-users/{target.pk}/')
+        force_authenticate(request, user=self.user)
+        response = _UserRetrieveUpdateView.as_view()(request, pk=target.pk)
+        self.assertEqual(response.status_code, 403)

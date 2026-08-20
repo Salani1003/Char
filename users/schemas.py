@@ -43,7 +43,7 @@ TOKEN_OBTAIN_SCHEMA = extend_schema(
     examples=[
         OpenApiExample(
             'Solicitud de login',
-            value={'email': 'jane.doe@example.com', 'password': 'S3curePass!'},
+            value={'email': 'demo@demo.com', 'password': '1234'},
             request_only=True,
         ),
         OpenApiExample(

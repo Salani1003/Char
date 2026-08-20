@@ -1,4 +1,5 @@
-from rest_framework.permissions import DjangoObjectPermissions
+from django.http import Http404
+from rest_framework.permissions import SAFE_METHODS, DjangoObjectPermissions
 
 __all__ = ['DjangoObjectPermissionsWithView']
 
@@ -37,3 +38,41 @@ class DjangoObjectPermissionsWithView(DjangoObjectPermissions):
         'OPTIONS': ['%(app_label)s.view_%(model_name)s'],
         'HEAD': ['%(app_label)s.view_%(model_name)s'],
     }
+
+    def has_object_permission(self, request, view, obj):
+        """
+        Reimplementa `DjangoObjectPermissions.has_object_permission` con un
+        fallback a nivel de modelo.
+
+        Django's `ModelBackend.get_all_permissions()` devuelve un set
+        vacío en cuanto se le pasa un `obj`, así que `user.has_perms(perms,
+        obj)` siempre da `False` para usuarios no-superuser bajo el backend
+        de auth por defecto, sin importar los Permissions/Groups que
+        tengan asignados. Sin este fallback, cualquier retrieve/update/
+        destroy de un objeto puntual quedaría bloqueado para todo el mundo
+        salvo superusers, aunque tengan el Permission correspondiente.
+
+        Se chequea el permiso a nivel de objeto (relevante en cuanto se
+        agregue un backend como `django-guardian`) OR a nivel de modelo, de
+        forma que hoy (sin backend de permisos de objeto) esto se comporta
+        como un chequeo de modelo puro, y el día que se agregue ese backend,
+        los permisos de objeto se suman sin quitarle acceso a quien ya
+        tenía el permiso a nivel de modelo.
+        """
+        queryset = self._queryset(view)
+        model_cls = queryset.model
+        user = request.user
+
+        perms = self.get_required_object_permissions(request.method, model_cls)
+
+        if not (user.has_perms(perms, obj) or user.has_perms(perms)):
+            if request.method in SAFE_METHODS:
+                raise Http404
+
+            read_perms = self.get_required_object_permissions('GET', model_cls)
+            if not (user.has_perms(read_perms, obj) or user.has_perms(read_perms)):
+                raise Http404
+
+            return False
+
+        return True

@@ -37,5 +37,14 @@ ROLES: dict[str, list[str]] = {
         "users.change_user",
         "users.delete_user",
         "auth.view_group",
+        "clients.add_client",
+        "clients.view_client",
+        "clients.change_client",
+        "clients.delete_client",
+    ],
+    "Vendedor": [
+        "clients.add_client",
+        "clients.view_client",
+        "clients.change_client",
     ],
 }

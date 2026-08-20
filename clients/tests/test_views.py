@@ -1,4 +1,8 @@
+from unittest import mock
+
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.test import TestCase
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from clients.models import Client
@@ -142,3 +146,37 @@ class ClientViewSetTests(TestCase):
         self._destroy(client.pk)
 
         self.assertTrue(Client.all_objects.filter(pk=client.pk).exists())
+
+    def test_create_restores_soft_deleted_client_with_same_email(self):
+        existing = self._build(email='ada@example.com')
+        existing.delete(self.user)
+
+        response = self._create(self._valid_payload(first_name='Grace', last_name='Hopper'))
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['id'], existing.id)
+        existing.refresh_from_db()
+        self.assertFalse(existing.is_deleted)
+        self.assertEqual(existing.first_name, 'Grace')
+        self.assertEqual(Client.all_objects.filter(email='ada@example.com').count(), 1)
+
+    def test_create_translates_service_validation_error_into_drf_validation_error(self):
+        """
+        `ClientService.create_client` puede levantar `DjangoValidationError`
+        (ej. bajo una condición de carrera que el validator de unicidad del
+        serializer no llegó a atajar). `ClientViewSet.perform_create` debe
+        traducir eso a un `rest_framework.exceptions.ValidationError`, que
+        DRF sabe convertir en una respuesta 400 en vez de un 500.
+        """
+        request = self.factory.post('/clients/', {}, format='json')
+        request.user = self.user
+        view = ClientViewSet()
+        view.request = request
+        serializer = mock.Mock(validated_data=self._valid_payload())
+
+        with mock.patch(
+            'clients.views.ClientService.create_client',
+            side_effect=DjangoValidationError('Ya existe un cliente con este email.'),
+        ):
+            with self.assertRaises(ValidationError):
+                view.perform_create(serializer)

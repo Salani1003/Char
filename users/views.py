@@ -35,6 +35,17 @@ class UserViewSet(BaseModelViewSet):
 
     queryset = User.objects.all().order_by('email')
     serializer_class = UserSerializer
+    filterset_fields = ['is_active']
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
 
 
 @GROUP_VIEWSET_SCHEMA

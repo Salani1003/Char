@@ -33,7 +33,7 @@ class UserViewSet(BaseModelViewSet):
     chequeados por `DjangoObjectPermissionsWithView` vía `BaseModelViewSet`).
     """
 
-    queryset = User.objects.all().order_by('email')
+    queryset = User.objects.all().order_by('id')
     serializer_class = UserSerializer
     filterset_fields = ['is_active']
 

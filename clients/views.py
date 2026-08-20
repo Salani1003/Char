@@ -10,7 +10,7 @@ from core.viewsets import BaseModelViewSet
 
 @CLIENT_VIEWSET_SCHEMA
 class ClientViewSet(BaseModelViewSet):
-    queryset = Client.objects.all()
+    queryset = Client.objects.all().order_by('-created_at')
     serializer_class = ClientSerializer
 
     def perform_create(self, serializer):

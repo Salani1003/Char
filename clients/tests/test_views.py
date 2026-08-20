@@ -35,8 +35,8 @@ class ClientViewSetTests(TestCase):
         data.update(overrides)
         return data
 
-    def _list(self):
-        request = self.factory.get('/clients/')
+    def _list(self, query_params=None):
+        request = self.factory.get('/clients/', query_params or {})
         force_authenticate(request, user=self.user)
         return ClientViewSet.as_view({'get': 'list'})(request)
 
@@ -159,6 +159,34 @@ class ClientViewSetTests(TestCase):
         self.assertFalse(existing.is_deleted)
         self.assertEqual(existing.first_name, 'Grace')
         self.assertEqual(Client.all_objects.filter(email='ada@example.com').count(), 1)
+
+    def test_list_search_matches_first_name_last_name_or_email(self):
+        self._build(email='ada@example.com')
+        self._build(first_name='Grace', last_name='Hopper', email='grace@example.com')
+
+        response = self._list({'search': 'grace'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['email'], 'grace@example.com')
+
+    def test_list_orders_by_first_name_ascending(self):
+        self._build(first_name='Grace', last_name='Hopper', email='grace@example.com')
+        self._build(first_name='Ada', last_name='Lovelace', email='ada@example.com')
+
+        response = self._list({'ordering': 'first_name'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['first_name'] for row in response.data], ['Ada', 'Grace'])
+
+    def test_list_orders_by_created_at_descending_by_default(self):
+        first = self._build(first_name='Ada', last_name='Lovelace', email='ada@example.com')
+        second = self._build(first_name='Grace', last_name='Hopper', email='grace@example.com')
+
+        response = self._list()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.data], [second.id, first.id])
 
     def test_create_translates_service_validation_error_into_drf_validation_error(self):
         """

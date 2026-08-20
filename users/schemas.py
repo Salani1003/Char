@@ -13,6 +13,7 @@ __all__ = [
     'TOKEN_REFRESH_SCHEMA',
     'USER_VIEWSET_SCHEMA',
     'GROUP_VIEWSET_SCHEMA',
+    'ME_SCHEMA',
 ]
 
 _ACCESS_TOKEN_EXAMPLE = (
@@ -150,6 +151,17 @@ USER_VIEWSET_SCHEMA = extend_schema_view(
         description='Requiere permiso `users.delete_user`.',
         responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND},
     ),
+)
+
+ME_SCHEMA = extend_schema(
+    tags=['Users'],
+    summary='Obtener el usuario logueado',
+    description=(
+        'Devuelve la información del usuario autenticado a partir del token '
+        '`access` enviado. No requiere permisos de administración de '
+        'usuarios (`users.view_user`), sólo estar autenticado.'
+    ),
+    responses={401: UNAUTHORIZED},
 )
 
 GROUP_VIEWSET_SCHEMA = extend_schema_view(

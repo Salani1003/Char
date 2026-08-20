@@ -1,5 +1,8 @@
 from django.contrib.auth.models import Group
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from core.permissions import DjangoObjectPermissionsWithView
@@ -7,6 +10,7 @@ from core.viewsets import BaseModelViewSet
 from users.models import User
 from users.schemas import (
     GROUP_VIEWSET_SCHEMA,
+    ME_SCHEMA,
     TOKEN_OBTAIN_SCHEMA,
     TOKEN_REFRESH_SCHEMA,
     USER_VIEWSET_SCHEMA,
@@ -46,6 +50,12 @@ class UserViewSet(BaseModelViewSet):
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save(update_fields=['is_active'])
+
+    @ME_SCHEMA
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def me(self, request):
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
 
 
 @GROUP_VIEWSET_SCHEMA

@@ -8,3 +8,10 @@ class Categoria(BaseModel):
 
     def __str__(self):
         return self.nombre
+
+
+class Color(BaseModel):
+    nombre = models.CharField(max_length=100, blank=False, unique=True)
+
+    def __str__(self):
+        return self.nombre

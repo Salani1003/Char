@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import environ
@@ -46,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'drf_spectacular',
     'corsheaders',
     'django_filters',
@@ -162,6 +164,36 @@ REST_FRAMEWORK = {
         'django_filters.rest_framework.DjangoFilterBackend',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.ScopedRateThrottle',
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        # El throttling de DRF usa el cache de Django (LocMemCache por
+        # default, por proceso). Con varios workers de gunicorn el límite
+        # efectivo se multiplica por la cantidad de workers: calibrar estos
+        # valores sabiendo eso, o configurar un CACHES compartido (Redis)
+        # si se necesita un límite exacto.
+        'login': env('THROTTLE_RATE_LOGIN', default='10/min'),
+        'anon': env('THROTTLE_RATE_ANON', default='60/hour'),
+        'user': env('THROTTLE_RATE_USER', default='1000/hour'),
+    },
+}
+
+# rest_framework_simplejwt
+# https://django-rest-framework-simplejwt.readthedocs.io/en/latest/settings.html
+#
+# ROTATE_REFRESH_TOKENS + BLACKLIST_AFTER_ROTATION: cada refresh consume el
+# token usado (queda en la blacklist) y entrega uno nuevo. Sin esto, un
+# refresh token robado sigue siendo válido durante todo su lifetime sin
+# forma de revocarlo — no hay logout real posible.
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=env.int('JWT_ACCESS_TOKEN_MINUTES', default=5)),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=env.int('JWT_REFRESH_TOKEN_DAYS', default=1)),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
 }
 
 # drf-spectacular
@@ -173,3 +205,24 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
 }
+
+# Hardening de producción
+# https://docs.djangoproject.com/en/6.1/topics/security/
+#
+# Sólo aplica con DEBUG=False: en dev (runserver sin TLS) estos valores
+# romperían cookies/redirects. `SECURE_PROXY_SSL_HEADER` asume que el
+# proxy/load balancer que termina TLS setea `X-Forwarded-Proto`.
+if not DEBUG:
+    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=True)
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+    SECURE_HSTS_SECONDS = env.int('SECURE_HSTS_SECONDS', default=60 * 60 * 24 * 30)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True)
+    SECURE_HSTS_PRELOAD = env.bool('SECURE_HSTS_PRELOAD', default=False)
+
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
+
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'

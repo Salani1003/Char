@@ -1,8 +1,17 @@
+from unittest import mock
+
+from django.core.cache import cache
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.throttling import SimpleRateThrottle
 
 from users.models import User
-from users.views import UserViewSet
+from users.views import (
+    DocumentedTokenBlacklistView,
+    DocumentedTokenObtainPairView,
+    DocumentedTokenRefreshView,
+    UserViewSet,
+)
 
 
 class UserViewSetTests(TestCase):
@@ -124,3 +133,91 @@ class UserViewSetTests(TestCase):
         emails = {row['email'] for row in response.data}
         self.assertIn(inactive.email, emails)
         self.assertIn(self.admin.email, emails)
+
+
+class TokenObtainThrottleTests(TestCase):
+    """
+    `/api/auth/token/` es el blanco directo de fuerza bruta de contraseñas:
+    verifica que el `throttle_scope = 'login'` de `DocumentedTokenObtainPairView`
+    corte los intentos en vez de dejarlos pasar sin límite.
+    """
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _obtain_token(self):
+        request = self.factory.post(
+            '/auth/token/', {'email': 'nadie@example.com', 'password': 'mala'}, format='json'
+        )
+        return DocumentedTokenObtainPairView.as_view()(request)
+
+    def test_exceeding_login_rate_returns_429(self):
+        # `SimpleRateThrottle.THROTTLE_RATES` se fija como atributo de clase
+        # al importar `rest_framework.throttling` (lee `DEFAULT_THROTTLE_RATES`
+        # una sola vez), así que `override_settings` no lo actualiza en
+        # caliente. Se parchea el dict compartido directamente para acotar
+        # el rate a 2/min sin depender de repetir 11 requests reales.
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {'login': '2/min'}):
+            self._obtain_token()
+            self._obtain_token()
+
+            response = self._obtain_token()
+
+        self.assertEqual(response.status_code, 429)
+
+
+class TokenBlacklistTests(TestCase):
+    """
+    Cubre el logout real: rotación de refresh tokens (SIMPLE_JWT) + blacklist.
+    Sin esto, un `refresh` seguía siendo válido hasta expirar aunque el
+    cliente lo descartara.
+    """
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = User.objects.create_user(email='member@example.com', password='pass12345')
+
+    def _obtain_token(self):
+        request = self.factory.post(
+            '/auth/token/', {'email': 'member@example.com', 'password': 'pass12345'}, format='json'
+        )
+        return DocumentedTokenObtainPairView.as_view()(request)
+
+    def _refresh(self, refresh_token):
+        request = self.factory.post('/auth/token/refresh/', {'refresh': refresh_token}, format='json')
+        return DocumentedTokenRefreshView.as_view()(request)
+
+    def _blacklist(self, refresh_token):
+        request = self.factory.post('/auth/logout/', {'refresh': refresh_token}, format='json')
+        return DocumentedTokenBlacklistView.as_view()(request)
+
+    def test_refresh_rotates_and_blacklists_the_used_token(self):
+        refresh = self._obtain_token().data['refresh']
+
+        first_refresh = self._refresh(refresh)
+        self.assertEqual(first_refresh.status_code, 200)
+        self.assertIn('refresh', first_refresh.data)
+        self.assertNotEqual(first_refresh.data['refresh'], refresh)
+
+        # El refresh ya usado (rotado) quedó en la blacklist: reusarlo falla.
+        reused = self._refresh(refresh)
+        self.assertEqual(reused.status_code, 401)
+
+    def test_logout_blacklists_refresh_token(self):
+        refresh = self._obtain_token().data['refresh']
+
+        logout_response = self._blacklist(refresh)
+        self.assertEqual(logout_response.status_code, 200)
+
+        refresh_after_logout = self._refresh(refresh)
+        self.assertEqual(refresh_after_logout.status_code, 401)
+
+    def test_logout_with_already_blacklisted_token_returns_401(self):
+        refresh = self._obtain_token().data['refresh']
+        self._blacklist(refresh)
+
+        response = self._blacklist(refresh)
+
+        self.assertEqual(response.status_code, 401)

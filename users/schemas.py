@@ -11,6 +11,7 @@ from core.schemas import FORBIDDEN, NOT_FOUND, UNAUTHORIZED, VALIDATION_ERROR
 __all__ = [
     'TOKEN_OBTAIN_SCHEMA',
     'TOKEN_REFRESH_SCHEMA',
+    'TOKEN_BLACKLIST_SCHEMA',
     'USER_VIEWSET_SCHEMA',
     'GROUP_VIEWSET_SCHEMA',
     'ME_SCHEMA',
@@ -93,6 +94,35 @@ TOKEN_REFRESH_SCHEMA = extend_schema(
     ],
     responses={
         401: OpenApiResponse(description='El token de refresco es inválido, expiró o fue revocado.'),
+    },
+)
+
+TOKEN_BLACKLIST_SCHEMA = extend_schema(
+    tags=['Auth'],
+    summary='Cerrar sesión (revocar refresh token)',
+    description=(
+        'Invalida un token `refresh` metiéndolo en la blacklist, para que ya '
+        'no pueda usarse para pedir nuevos tokens `access`. Es la forma de '
+        'hacer logout real: sin esto, un `refresh` seguiría siendo válido '
+        'hasta su expiración natural aunque el cliente lo descarte. No '
+        'invalida el `access` token que ya esté en uso; ese expira solo '
+        '(lifetime corto, ver `SIMPLE_JWT.ACCESS_TOKEN_LIFETIME`).'
+    ),
+    examples=[
+        OpenApiExample(
+            'Solicitud de logout',
+            value={'refresh': _REFRESH_TOKEN_EXAMPLE},
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Token ya inválido, expirado o revocado',
+            value={'detail': 'Token is blacklisted', 'code': 'token_not_valid'},
+            response_only=True,
+            status_codes=['401'],
+        ),
+    ],
+    responses={
+        401: OpenApiResponse(description='El token de refresco es inválido, expiró o ya fue revocado.'),
     },
 )
 

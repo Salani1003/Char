@@ -3,7 +3,11 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import (
+    TokenBlacklistView,
+    TokenObtainPairView,
+    TokenRefreshView,
+)
 
 from core.permissions import DjangoObjectPermissionsWithView
 from core.viewsets import BaseModelViewSet
@@ -11,6 +15,7 @@ from users.models import User
 from users.schemas import (
     GROUP_VIEWSET_SCHEMA,
     ME_SCHEMA,
+    TOKEN_BLACKLIST_SCHEMA,
     TOKEN_OBTAIN_SCHEMA,
     TOKEN_REFRESH_SCHEMA,
     USER_VIEWSET_SCHEMA,
@@ -20,12 +25,24 @@ from users.serializers import GroupSerializer, UserSerializer
 
 @TOKEN_OBTAIN_SCHEMA
 class DocumentedTokenObtainPairView(TokenObtainPairView):
-    pass
+    # Scope de throttling más estricto que el 'anon' default: este endpoint
+    # es el blanco directo de fuerza bruta de contraseñas.
+    throttle_scope = 'login'
 
 
 @TOKEN_REFRESH_SCHEMA
 class DocumentedTokenRefreshView(TokenRefreshView):
-    pass
+    throttle_scope = 'login'
+
+
+@TOKEN_BLACKLIST_SCHEMA
+class DocumentedTokenBlacklistView(TokenBlacklistView):
+    """
+    Logout real: mete el `refresh` token en la blacklist para que ya no
+    pueda usarse para pedir nuevos `access` tokens. No invalida el `access`
+    token vivo (sigue firmado y válido hasta que expire solo, típicamente
+    unos minutos) — es la limitación inherente de un JWT stateless.
+    """
 
 
 @USER_VIEWSET_SCHEMA

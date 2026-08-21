@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models
 from django.test import TestCase
 
-from products.models import Categoria, Color, Producto
+from products.models import Categoria, Color, Producto, Stock, Variante
 from users.models import User
 
 
@@ -159,3 +159,162 @@ class ProductoModelTests(TestCase):
 
         self.assertFalse(Producto.objects.filter(pk=producto.pk).exists())
         self.assertTrue(Producto.all_objects.filter(pk=producto.pk).exists())
+
+
+class VarianteModelTests(TestCase):
+    """
+    Prueba el modelo `Variante`: campos propios (`producto`, `talle`,
+    `color`), su representación en texto, la protección de `producto` y
+    `color` ante borrado, la restricción de unicidad y su integración con
+    el soft delete heredado de `BaseModel`.
+    """
+
+    def setUp(self):
+        self.categoria = Categoria.objects.create(nombre='Bebidas')
+        self.producto = Producto.objects.create(
+            categoria=self.categoria,
+            nombre='Remera',
+            precio_venta=Decimal('100.00'),
+            precio_costo=Decimal('50.00'),
+        )
+        self.color = Color.objects.create(nombre='Rojo')
+
+    def test_str_returns_producto_talle_color(self):
+        variante = Variante.objects.create(
+            producto=self.producto, talle=Variante.Talle.M, color=self.color
+        )
+
+        self.assertEqual(str(variante), 'Remera - M - Rojo')
+
+    def test_talle_max_length_is_5(self):
+        field = Variante._meta.get_field('talle')
+
+        self.assertEqual(field.max_length, 5)
+
+    def test_talle_only_accepts_valid_choices(self):
+        variante = Variante(
+            producto=self.producto, talle='INVALIDO', color=self.color
+        )
+
+        with self.assertRaises(ValidationError):
+            variante.full_clean()
+
+    def test_producto_protects_against_deletion(self):
+        Variante.objects.create(
+            producto=self.producto, talle=Variante.Talle.M, color=self.color
+        )
+
+        with self.assertRaises(IntegrityError):
+            models.Model.delete(self.producto)
+
+    def test_color_protects_against_deletion(self):
+        Variante.objects.create(
+            producto=self.producto, talle=Variante.Talle.M, color=self.color
+        )
+
+        with self.assertRaises(IntegrityError):
+            models.Model.delete(self.color)
+
+    def test_unique_together_producto_talle_color(self):
+        Variante.objects.create(
+            producto=self.producto, talle=Variante.Talle.M, color=self.color
+        )
+
+        with self.assertRaises(IntegrityError):
+            Variante.objects.create(
+                producto=self.producto, talle=Variante.Talle.M, color=self.color
+            )
+
+    def test_id_sequence_starts_at_1000(self):
+        variante = Variante.objects.create(
+            producto=self.producto, talle=Variante.Talle.M, color=self.color
+        )
+
+        self.assertGreaterEqual(variante.id, 1000)
+
+    def test_objects_excludes_soft_deleted_variantes(self):
+        variante = Variante.objects.create(
+            producto=self.producto, talle=Variante.Talle.M, color=self.color
+        )
+        user = User.objects.create_user(email='deleter@example.com', password='pass12345')
+
+        variante.delete(user)
+
+        self.assertFalse(Variante.objects.filter(pk=variante.pk).exists())
+        self.assertTrue(Variante.all_objects.filter(pk=variante.pk).exists())
+
+
+class StockModelTests(TestCase):
+    """
+    Prueba el modelo `Stock`: campos propios (`variante`, `fisica`,
+    `reservada`), la propiedad `disponible`, su representación en texto, la
+    relación uno a uno con `Variante`, la restricción de que `reservada` no
+    supere a `fisica` y su integración con el soft delete heredado de
+    `BaseModel`.
+    """
+
+    def setUp(self):
+        categoria = Categoria.objects.create(nombre='Bebidas')
+        producto = Producto.objects.create(
+            categoria=categoria,
+            nombre='Remera',
+            precio_venta=Decimal('100.00'),
+            precio_costo=Decimal('50.00'),
+        )
+        color = Color.objects.create(nombre='Rojo')
+        self.variante = Variante.objects.create(
+            producto=producto, talle=Variante.Talle.M, color=color
+        )
+
+    def test_str_includes_disponible(self):
+        stock = Stock.objects.create(variante=self.variante, fisica=10, reservada=3)
+
+        self.assertIn('disponible: 7', str(stock))
+
+    def test_fisica_defaults_to_zero(self):
+        stock = Stock.objects.create(variante=self.variante)
+
+        self.assertEqual(stock.fisica, 0)
+
+    def test_reservada_defaults_to_zero(self):
+        stock = Stock.objects.create(variante=self.variante)
+
+        self.assertEqual(stock.reservada, 0)
+
+    def test_disponible_returns_fisica_minus_reservada(self):
+        stock = Stock.objects.create(variante=self.variante, fisica=10, reservada=4)
+
+        self.assertEqual(stock.disponible, 6)
+
+    def test_reservada_cannot_exceed_fisica(self):
+        with self.assertRaises(IntegrityError):
+            Stock.objects.create(variante=self.variante, fisica=1, reservada=2)
+
+    def test_fisica_cannot_be_negative(self):
+        with self.assertRaises(IntegrityError):
+            Stock.objects.create(variante=self.variante, fisica=-1)
+
+    def test_reservada_cannot_be_negative(self):
+        with self.assertRaises(IntegrityError):
+            Stock.objects.create(variante=self.variante, fisica=10, reservada=-1)
+
+    def test_variante_is_one_to_one(self):
+        Stock.objects.create(variante=self.variante, fisica=10, reservada=0)
+
+        with self.assertRaises(IntegrityError):
+            Stock.objects.create(variante=self.variante, fisica=5, reservada=0)
+
+    def test_variante_protects_against_deletion(self):
+        Stock.objects.create(variante=self.variante, fisica=10, reservada=0)
+
+        with self.assertRaises(IntegrityError):
+            models.Model.delete(self.variante)
+
+    def test_objects_excludes_soft_deleted_stocks(self):
+        stock = Stock.objects.create(variante=self.variante, fisica=10, reservada=0)
+        user = User.objects.create_user(email='deleter@example.com', password='pass12345')
+
+        stock.delete(user)
+
+        self.assertFalse(Stock.objects.filter(pk=stock.pk).exists())
+        self.assertTrue(Stock.all_objects.filter(pk=stock.pk).exists())

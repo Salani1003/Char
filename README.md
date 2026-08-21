@@ -223,6 +223,12 @@ y registra quién lo hizo, nunca un `DELETE` físico en la base.
 python manage.py test
 ```
 
+## Pendientes
+
+Hallazgos abiertos de la última auditoría de seguridad/calidad (escalada de
+privilegios vía `groups`, paginación, completar `products`, etc.), con
+contexto y opciones para retomarlos: [`docs/TODO.md`](docs/TODO.md).
+
 ## Producción
 
 La imagen de Docker corre como usuario no-root y trae `gunicorn` en las

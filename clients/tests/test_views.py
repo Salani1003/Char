@@ -188,6 +188,16 @@ class ClientViewSetTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row['id'] for row in response.data], [second.id, first.id])
 
+    def test_update_with_email_of_soft_deleted_client_returns_400_not_500(self):
+        deleted = self._build(email='deleted@example.com')
+        deleted.delete(self.user)
+        client = self._build(email='ada@example.com')
+
+        response = self._update(client.pk, self._valid_payload(email='deleted@example.com'))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('email', response.data)
+
     def test_create_translates_service_validation_error_into_drf_validation_error(self):
         """
         `ClientService.create_client` puede levantar `DjangoValidationError`

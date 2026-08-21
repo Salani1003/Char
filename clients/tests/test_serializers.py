@@ -1,3 +1,4 @@
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from clients.models import Client
@@ -151,3 +152,41 @@ class ClientSerializerTests(TestCase):
         self.assertEqual(updated.last_name, 'Lovelace')
         self.assertEqual(updated.email, 'ada@example.com')
         self.assertEqual(updated.origin, Client.Origin.INSTAGRAM)
+
+    def test_update_keeping_same_email_does_not_self_block(self):
+        client = self._build(email='ada@example.com')
+
+        serializer = ClientSerializer(client, data={'email': 'ada@example.com'}, partial=True)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_update_rejects_email_of_another_live_client(self):
+        self._build(email='grace@example.com')
+        client = self._build(email='ada@example.com')
+
+        serializer = ClientSerializer(client, data={'email': 'grace@example.com'}, partial=True)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('email', serializer.errors)
+
+    def test_update_rejects_email_of_soft_deleted_client_instead_of_500(self):
+        deleted = self._build(email='deleted@example.com')
+        user = get_user_model().objects.create_user(email='deleter@example.com', password='pass12345')
+        deleted.delete(user)
+        client = self._build(email='ada@example.com')
+
+        serializer = ClientSerializer(client, data={'email': 'deleted@example.com'}, partial=True)
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('email', serializer.errors)
+
+    def test_create_with_email_of_soft_deleted_client_is_allowed_by_serializer(self):
+        # La restauración la hace ClientService, no el serializer: acá sólo
+        # se verifica que la validación no bloquee este caso en create.
+        deleted = self._build(email='deleted@example.com')
+        user = get_user_model().objects.create_user(email='deleter@example.com', password='pass12345')
+        deleted.delete(user)
+
+        serializer = ClientSerializer(data=self._valid_payload(email='deleted@example.com'))
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)

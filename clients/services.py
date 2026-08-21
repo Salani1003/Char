@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from clients.models import Client
 
@@ -13,13 +13,23 @@ class ClientService:
         email = data.get('email')
 
         if email:
-            existing = Client.all_objects.filter(email=email).first()
+            # select_for_update: bloquea la fila (si existe) hasta el commit,
+            # para que dos requests concurrentes con el mismo email no lean
+            # ambos "no existe" antes de que el primero haga commit.
+            existing = Client.all_objects.select_for_update().filter(email=email).first()
             if existing:
                 if not existing.is_deleted:
                     raise ValidationError('Ya existe un cliente con este email.')
                 return ClientService._restore_client(existing, data, user)
 
-        return Client.objects.create(**data, created_by=user, updated_by=user)
+        try:
+            return Client.objects.create(**data, created_by=user, updated_by=user)
+        except IntegrityError as exc:
+            # Red de seguridad: si igual se cuelan dos creates simultáneos
+            # con el mismo email (p. ej. select_for_update no aplicable por
+            # no soportar el backend, o ambos entraron antes del lock), no
+            # dejar que la IntegrityError se propague como 500.
+            raise ValidationError('Ya existe un cliente con este email.') from exc
 
     @staticmethod
     def _restore_client(client, data, user):

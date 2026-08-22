@@ -1,5 +1,6 @@
 from rest_framework import viewsets
 
+from core.pagination import DefaultPagination
 from core.permissions import DjangoObjectPermissionsWithView
 
 __all__ = ['BaseModelViewSet']
@@ -17,6 +18,8 @@ class BaseModelViewSet(viewsets.ModelViewSet):
       * Permisos a nivel de objeto: listos para activarse en cuanto se
         configure un backend de permisos de objeto (ej. `django-guardian`);
         no hace falta tocar nada acá cuando eso pase.
+      * Paginación por página vía `DefaultPagination` (20 resultados por
+        página, ajustable con `?page_size=` hasta un máximo de 100).
 
     Uso:
 
@@ -26,6 +29,7 @@ class BaseModelViewSet(viewsets.ModelViewSet):
     """
 
     permission_classes = [DjangoObjectPermissionsWithView]
+    pagination_class = DefaultPagination
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

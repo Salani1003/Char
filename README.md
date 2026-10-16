@@ -65,20 +65,21 @@ comunes, etc.) van en `core/schemas.py`. Ver `users/schemas.py` como ejemplo.
    DEBUG=True
    SECRET_KEY=<tu-secret-key>
 
-   ALLOWED_HOSTS=localhost,127.0.0.1
-   CORS_ALLOWED_ORIGINS=http://localhost:3000
-
-   DB_NAME=<nombre-db>
-   DB_USER=<usuario>
-   DB_PASSWORD=<password>
+   DB_NAME=char
+   DB_USER=char_user
+   DB_PASSWORD=char_password
    DB_HOST=localhost
    DB_PORT=5432
-
-   EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
    ```
 
-   Todas las variables tienen un default razonable en `config/settings.py`
-   salvo `SECRET_KEY`, `DB_USER` y `DB_PASSWORD`.
+   Son las únicas variables obligatorias (`DEBUG` tiene default `False`).
+   Opcionales, con default en `config/settings.py`: `ALLOWED_HOSTS`,
+   `CORS_ALLOWED_ORIGINS` (por defecto `localhost:5173`), `EMAIL_BACKEND`,
+   `JWT_ACCESS_TOKEN_MINUTES`, `JWT_REFRESH_TOKEN_DAYS` y, para producción
+   con `DEBUG=False`, `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`,
+   `SECURE_HSTS_INCLUDE_SUBDOMAINS`, `SECURE_HSTS_PRELOAD` y
+   `CSRF_TRUSTED_ORIGINS`. Para conectarte a la base desde tu máquina con
+   Docker usá `localhost:5434`.
 
 ## Uso con Docker (recomendado)
 
@@ -222,6 +223,11 @@ y registra quién lo hizo, nunca un `DELETE` físico en la base.
 ```bash
 python manage.py test
 ```
+
+## Documentación para retomar el proyecto
+
+Resumen completo del backend (cómo levantarlo, conceptos, API, modelos, pendientes
+y receta para agregar recursos): [`docs/BACKEND.md`](docs/BACKEND.md).
 
 ## Pendientes
 

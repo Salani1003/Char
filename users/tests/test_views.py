@@ -106,7 +106,7 @@ class UserViewSetTests(TestCase):
         response = self._list('?is_active=false')
 
         self.assertEqual(response.status_code, 200)
-        emails = {row['email'] for row in response.data}
+        emails = {row['email'] for row in response.data['results']}
         self.assertEqual(emails, {inactive.email})
 
     def test_list_can_filter_by_is_active_true(self):
@@ -118,7 +118,7 @@ class UserViewSetTests(TestCase):
         response = self._list('?is_active=true')
 
         self.assertEqual(response.status_code, 200)
-        emails = {row['email'] for row in response.data}
+        emails = {row['email'] for row in response.data['results']}
         self.assertIn(active.email, emails)
         self.assertNotIn(inactive.email, emails)
 
@@ -130,9 +130,23 @@ class UserViewSetTests(TestCase):
         response = self._list()
 
         self.assertEqual(response.status_code, 200)
-        emails = {row['email'] for row in response.data}
+        emails = {row['email'] for row in response.data['results']}
         self.assertIn(inactive.email, emails)
         self.assertIn(self.admin.email, emails)
+
+    def test_list_search_matches_first_name_last_name_and_email(self):
+        ada = User.objects.create_user(
+            email='a@example.com', password='pass12345', first_name='Ada', last_name='Lovelace'
+        )
+        bob = User.objects.create_user(
+            email='b@example.com', password='pass12345', first_name='Bob', last_name='Marley'
+        )
+        carl = User.objects.create_user(email='zeta@example.com', password='pass12345')
+
+        for term, expected in [('ada', ada), ('marley', bob), ('zeta', carl)]:
+            response = self._list(f'?search={term}')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual({row['email'] for row in response.data['results']}, {expected.email})
 
 
 class TokenObtainThrottleTests(TestCase):

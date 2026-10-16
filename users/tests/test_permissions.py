@@ -100,7 +100,7 @@ class UserViewSetPermissionsTests(TestCase):
 
     def test_administrator_role_permissions_grant_full_crud(self):
         """
-        El rol "Administrator" definido en core.roles.ROLES tiene
+        El rol "Administrador" definido en core.roles.ROLES tiene
         add/view/change/delete sobre User: confirma que ese diseño de
         permisos efectivamente habilita el borrado (desactivación) a
         nivel de endpoint.

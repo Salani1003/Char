@@ -1,6 +1,8 @@
 from django.contrib.auth.models import Group
 from rest_framework import viewsets
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import (
@@ -56,7 +58,9 @@ class UserViewSet(BaseModelViewSet):
 
     queryset = User.objects.all().order_by('id')
     serializer_class = UserSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = ['is_active']
+    search_fields = ['first_name', 'last_name', 'email']
 
     def perform_create(self, serializer):
         serializer.save()

@@ -111,10 +111,17 @@ JWT via `rest_framework_simplejwt`. `DEFAULT_PERMISSION_CLASSES` is
 per-view (e.g. `health` uses `AllowAny`).
 
 - `POST /api/auth/token/` — obtain `access`/`refresh` (body: `email`, `password`)
-- `POST /api/auth/token/refresh/` — renew `access`
+- `POST /api/auth/token/refresh/` — renew `access`. `ROTATE_REFRESH_TOKENS` + `BLACKLIST_AFTER_ROTATION` are on: the response also carries a new `refresh` and the used one is blacklisted, so clients must store the new pair.
+- `POST /api/auth/logout/` — blacklists the refresh token
 
 ### Environment
 
 All settings have defaults in `config/settings.py` except `SECRET_KEY`,
-`DB_USER`, `DB_PASSWORD`. Inside Docker, `DB_HOST` is overridden to `db` so
+`DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`. `.env.template` lists only
+those (plus `DEBUG`); the rest (`ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`,
+`EMAIL_BACKEND`, `JWT_*`, `SECURE_*`, `CSRF_TRUSTED_ORIGINS`) are optional overrides. Inside Docker, `DB_HOST` is overridden to `db` so
 the same `.env` works both locally and in Compose.
+
+### Docs
+
+`docs/BACKEND.md` is the full human-readable overview of the backend (setup, concepts, API, models, pending work); `docs/TODO.md` holds the open audit findings. Keep both in sync when the API, models, roles or settings change.

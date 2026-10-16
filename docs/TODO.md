@@ -17,16 +17,16 @@ groups = serializers.PrimaryKeyRelatedField(many=True, queryset=Group.objects.al
 `users/serializers.py:43`), pero eso no alcanza: los permisos *funcionales* de
 Char viven en los Groups (ver `core/roles.py`), no en esos flags técnicos. El
 grupo es el vector real — cualquier usuario con `users.change_user` puede
-mandar `PATCH /api/users/{id}/ {"groups": [<id de Administrator>]}` y
+mandar `PATCH /api/users/{id}/ {"groups": [<id de Administrador>]}` y
 asignarse (o asignarle a otro) cualquier rol, sin que nada lo frene.
 
 **Severidad honesta: latente, no explotable hoy.** El único rol definido con
-`users.change_user` es `Administrator` (`core/roles.py:34-44`), y ese rol ya
+`users.change_user` es `Administrador` (`core/roles.py:34-44`), y ese rol ya
 tiene `add`/`view`/`change`/`delete` sobre `User` — o sea, el techo actual es
-"un Administrator se reasigna a sí mismo Administrator", que no suma nada. El
+"un Administrador se reasigna a sí mismo Administrador", que no suma nada. El
 problema se activa el día que aparezca un rol intermedio con `change_user`
-pero menos permisos que `Administrator` (un "Supervisor", un "RRHH"): ese rol
-podría auto-promoverse a `Administrator` con un solo `PATCH`. Es una bomba de
+pero menos permisos que `Administrador` (un "Supervisor", un "RRHH"): ese rol
+podría auto-promoverse a `Administrador` con un solo `PATCH`. Es una bomba de
 tiempo estructural, no un incendio activo — pero conviene cerrarla antes de
 agregar ese próximo rol, no después.
 
@@ -40,12 +40,12 @@ rediscutir el espacio de soluciones):
    superusers quedan exentos de la regla (ya pueden todo).
 
    ```
-   Administrator (todos los permisos de users + clients)
-     → puede asignar: Administrator, Vendedor         ✓
+   Administrador (todos los permisos de users + clients)
+     → puede asignar: Administrador, Vendedor         ✓
 
    Supervisor (change_user + view_client, ejemplo futuro)
      → puede asignar sólo grupos con permisos ⊆ los suyos
-     → NO puede asignar Administrator                  ✗ (400)
+     → NO puede asignar Administrador                  ✗ (400)
    ```
 
 2. **Sólo superuser toca `groups`.** `groups` pasa a ser de sólo lectura salvo
@@ -88,7 +88,7 @@ alguien se autobloquee (`is_active=false` a sí mismo) por accidente.
   - No hay `serializers.py`, `urls.py` ni `schemas.py`; la app no está en
     `config/urls.py`, así que no es alcanzable por la API.
   - `core/roles.py` no define ningún permiso `products.*`, ni siquiera para
-    `Administrator`.
+    `Administrador`.
   - `Color` (`products/models.py`) es un modelo huérfano: nada lo referencia
     (ni FK ni M2M).
   - Nomenclatura en español (`Categoria`, `precio_venta`) contra el inglés del

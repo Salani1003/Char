@@ -31,7 +31,7 @@ Groups que falten, asignándoles los Permissions definidos.
 """
 
 ROLES: dict[str, list[str]] = {
-    "Administrator": [
+    "Administrador": [
         "users.add_user",
         "users.view_user",
         "users.change_user",

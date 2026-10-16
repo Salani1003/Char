@@ -130,7 +130,11 @@ USER_VIEWSET_SCHEMA = extend_schema_view(
     list=extend_schema(
         tags=['Users'],
         summary='Listar usuarios',
-        description='Lista los usuarios internos. Requiere permiso `users.view_user`.',
+        description=(
+            'Lista los usuarios internos. Requiere permiso `users.view_user`. '
+            'Admite `?search=` (busca por nombre, apellido y email) y '
+            '`?is_active=`.'
+        ),
         responses={401: UNAUTHORIZED, 403: FORBIDDEN},
     ),
     retrieve=extend_schema(

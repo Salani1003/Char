@@ -115,8 +115,7 @@ plain `DELETE` request soft-deletes and records who did it, never a
 physical `DELETE` query. It also ships `DjangoFilterBackend`, `SearchFilter`
 and `OrderingFilter` with a deterministic default `ordering = ['-created_at', '-id']`
 (`OrderingFilter` makes the view's `ordering` win over the queryset's
-`order_by`, so a viewset that wants another order must set `ordering`, as
-`CategoriaViewSet` does).
+`order_by`, so a viewset that wants another order must set `ordering`).
 
 ### OpenAPI docs convention
 

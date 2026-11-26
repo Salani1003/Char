@@ -28,13 +28,28 @@ class ReverseRelationFieldTests(TestCase):
     def test_serializer_with_reverse_relation_builds_fields(self):
         from rest_framework import serializers
 
-        from products.models import Categoria
+        from django.db import models
+        from django.test.utils import isolate_apps
 
-        class CategoriaConProductos(BaseModelSerializer):
-            productos = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+        from core.models import BaseModel
 
-            class Meta:
-                model = Categoria
-                fields = ['id', 'nombre', 'productos']
+        with isolate_apps('core'):
 
-        self.assertIn('productos', CategoriaConProductos().fields)
+            class Parent(BaseModel):
+                class Meta:
+                    app_label = 'core'
+
+            class Child(BaseModel):
+                parent = models.ForeignKey(Parent, on_delete=models.CASCADE, related_name='children')
+
+                class Meta:
+                    app_label = 'core'
+
+            class ParentSerializer(BaseModelSerializer):
+                children = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+
+                class Meta:
+                    model = Parent
+                    fields = ['id', 'children']
+
+            self.assertIn('children', ParentSerializer().fields)

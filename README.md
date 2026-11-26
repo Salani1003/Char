@@ -232,7 +232,7 @@ y receta para agregar recursos): [`docs/BACKEND.md`](docs/BACKEND.md).
 ## Pendientes
 
 Hallazgos abiertos de la última auditoría de seguridad/calidad (escalada de
-privilegios vía `groups`, paginación, completar `products`, etc.), con
+privilegios vía `groups`, paginación, etc.), con
 contexto y opciones para retomarlos: [`docs/TODO.md`](docs/TODO.md).
 
 ## Producción

@@ -86,8 +86,12 @@ class UserViewSet(BaseModelViewSet):
     @ME_SCHEMA
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def me(self, request):
-        serializer = self.get_serializer(request.user)
-        return Response(serializer.data)
+        data = dict(self.get_serializer(request.user).data)
+        # Permisos efectivos (de sus grupos y directos), `<app_label>.<codename>`: el
+        # cliente decide qué mostrar según esto y no según el nombre del rol. Sólo en
+        # `/me/`: en los listados sería una consulta extra por usuario.
+        data['permissions'] = sorted(request.user.get_all_permissions())
+        return Response(data)
 
 
 @GROUP_VIEWSET_SCHEMA

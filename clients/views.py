@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError
+from clients.filters import ClientFilter
 from clients.models import Client
 from clients.schemas import CLIENT_VIEWSET_SCHEMA
 from clients.serializers import ClientSerializer
@@ -12,6 +13,7 @@ class ClientViewSet(RestoreModelMixin, BaseModelViewSet):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     ordering = ['-created_at']
+    filterset_class = ClientFilter
     search_fields = ["first_name", "last_name", "email"]
 
     def perform_create(self, serializer):

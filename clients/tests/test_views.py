@@ -40,6 +40,30 @@ class ClientViewSetTests(TestCase):
         force_authenticate(request, user=self.user)
         return ClientViewSet.as_view({'get': 'list'})(request)
 
+    def test_list_filters_by_origin(self):
+        a = self._build(email='a@example.com', origin=Client.Origin.INSTAGRAM)
+        b = self._build(email='b@example.com', origin=Client.Origin.GOOGLE)
+        self._build(email='c@example.com', origin=Client.Origin.TIKTOK)
+
+        response = self._list({'origin': ['instagram', 'google']})
+
+        self.assertEqual({r['id'] for r in response.data['results']}, {a.id, b.id})
+
+    def test_list_rejects_invalid_origin(self):
+        self.assertEqual(self._list({'origin': 'nope'}).status_code, 400)
+
+    def test_list_filters_by_created_range_inclusive(self):
+        from datetime import datetime, timezone
+        old = self._build(email='old@example.com')
+        mid = self._build(email='mid@example.com')
+        new = self._build(email='new@example.com')
+        for c, d in ((old, 1), (mid, 10), (new, 20)):
+            Client.all_objects.filter(pk=c.pk).update(created_at=datetime(2026, 1, d, 12, tzinfo=timezone.utc))
+
+        response = self._list({'created_from': '2026-01-10', 'created_to': '2026-01-20'})
+
+        self.assertEqual({r['id'] for r in response.data['results']}, {mid.id, new.id})
+
     def _retrieve(self, pk):
         request = self.factory.get(f'/clients/{pk}/')
         force_authenticate(request, user=self.user)

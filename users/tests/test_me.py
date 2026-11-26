@@ -30,6 +30,27 @@ class GroupNamesTests(TestCase):
         self.login(User.objects.create_user(email='s@example.com', password='pass12345'))
         self.assertEqual(self.client.get('/api/users/me/').data['group_names'], [])
 
+    def test_me_returns_effective_permissions_from_groups(self):
+        from django.contrib.auth.models import Permission
+        self.gestor.permissions.set(Permission.objects.filter(
+            content_type__app_label='clients', codename__in=['view_client', 'add_client']))
+        user = User.objects.create_user(email='p@example.com', password='pass12345')
+        user.groups.set([self.gestor])
+        self.login(user)
+        self.assertEqual(
+            self.client.get('/api/users/me/').data['permissions'],
+            ['clients.add_client', 'clients.view_client'],
+        )
+
+    def test_me_without_permissions_returns_empty_list(self):
+        self.login(User.objects.create_user(email='n@example.com', password='pass12345'))
+        self.assertEqual(self.client.get('/api/users/me/').data['permissions'], [])
+
+    def test_users_list_does_not_include_permissions(self):
+        admin = User.objects.create_superuser(email='a@example.com', password='pass12345')
+        self.login(admin)
+        self.assertNotIn('permissions', self.client.get('/api/users/').data['results'][0])
+
     def test_group_ids_are_still_returned(self):
         user = User.objects.create_user(email='g@example.com', password='pass12345')
         user.groups.set([self.gestor])

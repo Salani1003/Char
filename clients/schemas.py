@@ -35,7 +35,11 @@ CLIENT_VIEWSET_SCHEMA = extend_schema_view(
     list=extend_schema(
         tags=['Clients'],
         summary='Listar clientes',
-        description='Lista los clientes (excluye los eliminados). Requiere permiso `clients.view_client`.',
+        description=(
+            'Lista los clientes (excluye los eliminados). Requiere permiso `clients.view_client`. '
+            'Filtros: `origin` (repetible), `created_from` y `created_to` (YYYY-MM-DD, inclusivos), '
+            '`search` (nombre, apellido, email) y `ordering`.'
+        ),
         responses={401: UNAUTHORIZED, 403: FORBIDDEN},
         examples=[_CLIENT_EXAMPLE],
     ),

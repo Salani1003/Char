@@ -193,7 +193,10 @@ ME_SCHEMA = extend_schema(
     description=(
         'Devuelve la información del usuario autenticado a partir del token '
         '`access` enviado. No requiere permisos de administración de '
-        'usuarios (`users.view_user`), sólo estar autenticado.'
+        'usuarios (`users.view_user`), sólo estar autenticado. Incluye '
+        '`permissions`: lista ordenada de permisos efectivos del usuario '
+        '(`<app_label>.<codename>`, ej. `clients.view_client`), provenientes de sus '
+        'grupos o asignados directamente. Un superusuario recibe todos.'
     ),
     responses={401: UNAUTHORIZED},
 )

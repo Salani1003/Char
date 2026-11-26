@@ -49,6 +49,66 @@ No linter/formatter is configured in this repo currently.
   can delete or deactivate their own user. `User` is not a `BaseModel`:
   `DELETE` just sets `is_active=False`.
 
+- `products/` — catálogos, producto y variantes (stock pendiente): `Category` (a lo sumo 2 niveles, `parent` opcional; el producto irá
+  a una hoja y filtrar por una raíz incluye sus hijas), `Brand`, `ProductModel`
+  (modelo de una marca), `Color` y `Size` (con `order`). Todos son `BaseModel`
+  con nombre único case-insensitive entre activos (`Lower('name')`, validado en
+  `UniqueNameSerializer`). No se borra una categoría con subcategorías ni una
+  marca con modelos. Endpoints: `categories`, `brands`, `product-models`, `colors`, `sizes`, `products`.
+  `Product`: categoría hoja obligatoria, `brand`/`product_model` opcionales (la marca
+  se deriva del modelo y deben coincidir), `sale_price`, `cost_price` opcional y
+  promo (`promo_price` + `promo_start`/`promo_end`, las tres juntas, inclusivas,
+  precio < venta; reglas en `Product.clean()`, reutilizadas por el serializer).
+  `current_price` = promo si hoy está en rango, si no venta (`effective_price`
+  espeja esto en SQL para filtrar/ordenar). `cost_price` sólo se lee/escribe con
+  el permiso `products.view_cost_price` (sólo Administrador); sin él se omite.
+  `ProductVariant` (`product-variants`): producto + color + talle (único entre
+  activas) + `sku` asignado por el sistema (`CHAR-0001`…, contador `SkuCounter` bajo
+  `select_for_update`, de sólo lectura, nunca se reutiliza);
+  el producto no cambia tras crearla; el stock se agregará a esta entidad.
+  Nombres de catálogos (`Brand`, `ProductModel`, `Category`, `Color`) sin repetidos:
+  `NormalizedNameMixin` los normaliza al guardar (`products/text.py`: espacios colapsados;
+  todo en minúsculas → capitalizado, por palabra en marcas y sólo la inicial en el resto;
+  con alguna mayúscula se respeta) y `clean()` rechaza uno que ya exista entre activos sin
+  distinguir mayúsculas, tildes ni espacios repetidos ("Nike"="nike"="NIKE", "Ñandú"="Nandu"),
+  acotado por marca (modelos) o por padre (categorías). Vale igual en API (400 con `existing`)
+  y admin; el índice `Lower(name)` es el respaldo de la base. `Size` se guarda siempre en
+  MAYÚSCULAS (`STYLE_UPPER`: "xl" → "XL") y es único globalmente.
+  Orden de los catálogos (para selectores, sin reordenar en el front): `Brand`, `Color`
+  y `ProductModel` salen alfabéticos sin distinguir mayúsculas (`Lower(name)`; modelos por
+  marca y luego nombre); `Category` agrupada por categoría principal (la principal primero)
+  y luego por nombre. Las tildes dependen del collation de Postgres (`en_US.utf8` en
+  Docker: bien para Á/é; la ñ se ordena junto a la n, no como letra aparte). Con collation
+  `C` el test `products/tests/test_ordering.py` falla. Para cargar todas las opciones usar
+  `?page_size=100` (máx.); para muchas, buscar con `?search=`.
+  Apoyo al front: `Category` trae `label` ("Vestidos › Largos"), `parent_name`, `has_children` y `products_count` (activos; anotados en
+  el viewset, sin consultas por fila) y se filtra con `?leaf=true|false` (leaf = asignable
+  a productos); `Product` trae `category_label` ("Vestidos › Largos"), `brand_name` y
+  `product_model_name`; `Color.hex` se guarda siempre en mayúsculas (`#14284B`).
+  Slugs (`Category`, `Brand`, `Product`; futura tienda online): únicos entre activos
+  (`unique_when_active`), opcionales al crear — los genera `products/slugs.py` desde el
+  nombre (colisión: prefijo del padre en categorías, luego `-2`, `-3`…) con reintento
+  ante carreras (`AutoSlugMixin`), y `SlugFallbackMixin` cubre admin/shell/tests. No
+  cambian al renombrar; `slug: ""` en un PATCH de producto lo regenera sólo si no está
+  publicado. `Product.is_published` (default `false`, filtrable) marca si va a la tienda y sólo se
+  activa con ≥1 variante activa (no se puede crear ya publicado; no se elimina la última
+  variante de un producto publicado — ambas reglas sólo en la API/`clean`, no en el admin masivo).
+  Mismo criterio que `Cali/cali_backend`.
+  `GET product-variants/` es la grilla de variantes: cada fila trae nombres (producto, color
+  con `color_hex`, talle, categoría, marca, modelo), `is_published` y precios del producto
+  (`current_price`, `is_on_promo`; sin costo). Filtros: `product`, `color`, `size`, `category`
+  (raíz incluye hijas), `brand`, `product_model`, `is_published`, `on_promo`, `min_price`,
+  `max_price`; `search`; `ordering` por `sku`, `created_at`, `product__name`, `color__name`,
+  `size__order`, `effective_price`, `product__sale_price`. Al escribir sólo se usan
+  `product`, `color` y `size`. `effective_price()` (en `products/filters.py`) es el precio vigente en SQL.
+  `GET products/` trae `variants_count` (activas; para todo el que ve productos) y, sólo en el listado y con
+  `products.view_productvariant`, `variants` (`{id, sku, color{id,name,hex}, size{id,name,order}}` por color y talle);
+  filtro `?has_variants=true|false` y `ordering=variants_count`.
+  `GET products/{id}/with-variants/` devuelve el producto + `variants` activas (color/talle
+  anidados; exige `view_product` y `view_productvariant`); `GET products/{id}/` no las incluye.
+  No se borra categoría/marca/modelo con productos activos, ni producto/color/talle
+  con variantes activas.
+
 ### Permissions / roles system
 
 There is no custom `Role` model. A "role" is just a `django.contrib.auth`

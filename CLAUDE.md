@@ -117,6 +117,11 @@ and `OrderingFilter` with a deterministic default `ordering = ['-created_at', '-
 (`OrderingFilter` makes the view's `ordering` win over the queryset's
 `order_by`, so a viewset that wants another order must set `ordering`).
 
+`core/viewsets.py` también ofrece `RestoreModelMixin` (opt-in, va antes de
+`BaseModelViewSet`): agrega `POST <recurso>/{id}/restore/`, que revierte el soft
+delete y exige `change_<modelo>` (`DjangoRestorePermission`). Lo usa `ClientViewSet`.
+`Client.email` es obligatorio, único y siempre en minúsculas.
+
 ### OpenAPI docs convention
 
 Endpoint documentation (`@extend_schema`, examples, response descriptions)

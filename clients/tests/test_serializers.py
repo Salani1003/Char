@@ -107,13 +107,11 @@ class ClientSerializerTests(TestCase):
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
-    def test_email_is_optional(self):
-        payload = self._valid_payload()
-        payload.pop('email')
-
-        serializer = ClientSerializer(data=payload)
-
-        self.assertTrue(serializer.is_valid(), serializer.errors)
+    def test_email_is_required(self):
+        for payload in (self._valid_payload(email=None), {k: v for k, v in self._valid_payload().items() if k != 'email'}):
+            serializer = ClientSerializer(data=payload)
+            self.assertFalse(serializer.is_valid())
+            self.assertIn('email', serializer.errors)
 
     def test_origin_rejects_invalid_choice(self):
         payload = self._valid_payload(origin='not-a-real-origin')

@@ -16,6 +16,7 @@ class ClientModelTests(TestCase):
         data = {
             'first_name': 'Ada',
             'last_name': 'Lovelace',
+            'email': 'ada@example.com',
             'origin': Client.Origin.INSTAGRAM,
         }
         data.update(overrides)
@@ -46,12 +47,11 @@ class ClientModelTests(TestCase):
 
         self.assertIsNone(client.phone)
 
-    def test_email_can_be_null(self):
-        client = self._build(email=None)
-        client.full_clean()
-        client.save()
-
-        self.assertIsNone(client.email)
+    def test_email_is_required(self):
+        for empty in (None, ''):
+            with self.subTest(email=empty):
+                with self.assertRaises(ValidationError):
+                    self._build(email=empty).full_clean()
 
     def test_origin_accepts_defined_choices(self):
         for value, _ in Client.Origin.choices:

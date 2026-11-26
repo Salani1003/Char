@@ -30,14 +30,6 @@ class ClientServiceTests(TestCase):
         self.assertEqual(client.email, 'ada@example.com')
         self.assertFalse(client.is_deleted)
 
-    def test_creates_client_when_no_email_provided(self):
-        payload = self._payload()
-        payload.pop('email')
-
-        client = ClientService.create_client(payload, user=self.user)
-
-        self.assertIsNotNone(client.pk)
-        self.assertIsNone(client.email)
 
     def test_rejects_email_belonging_to_active_client(self):
         Client.objects.create(**self._payload())

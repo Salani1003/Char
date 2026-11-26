@@ -4,11 +4,11 @@ from clients.models import Client
 from clients.schemas import CLIENT_VIEWSET_SCHEMA
 from clients.serializers import ClientSerializer
 from clients.services import ClientService
-from core.viewsets import BaseModelViewSet
+from core.viewsets import BaseModelViewSet, RestoreModelMixin
 
 
 @CLIENT_VIEWSET_SCHEMA
-class ClientViewSet(BaseModelViewSet):
+class ClientViewSet(RestoreModelMixin, BaseModelViewSet):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     ordering = ['-created_at']

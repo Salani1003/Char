@@ -53,7 +53,7 @@ CLIENT_VIEWSET_SCHEMA = extend_schema_view(
         description=(
             'Crea un cliente. Requiere permiso `clients.add_client`. Si ya '
             'existe un cliente eliminado (soft delete) con el mismo `email`, '
-            'se restaura y actualiza en lugar de crear uno nuevo.'
+            'se restaura y actualiza en lugar de crear uno nuevo. El `email` es obligatorio.'
         ),
         examples=[
             OpenApiExample(
@@ -84,6 +84,18 @@ CLIENT_VIEWSET_SCHEMA = extend_schema_view(
         description='Requiere permiso `clients.change_client`.',
         parameters=[_CLIENT_ID_PARAMETER],
         responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND, 400: VALIDATION_ERROR},
+    ),
+    restore=extend_schema(
+        tags=['Clients'],
+        summary='Restaurar un cliente eliminado',
+        description=(
+            'Revierte el soft delete de un cliente. Requiere permiso '
+            '`clients.change_client`. Si el cliente no está eliminado, responde 404.'
+        ),
+        request=None,
+        parameters=[_CLIENT_ID_PARAMETER],
+        responses={401: UNAUTHORIZED, 403: FORBIDDEN, 404: NOT_FOUND, 400: VALIDATION_ERROR},
+        examples=[_CLIENT_EXAMPLE],
     ),
     destroy=extend_schema(
         tags=['Clients'],

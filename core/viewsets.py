@@ -1,11 +1,52 @@
+from django.db import IntegrityError, transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.response import Response
 
 from core.pagination import DefaultPagination
-from core.permissions import DjangoObjectPermissionsWithView
+from core.permissions import DjangoObjectPermissionsWithView, DjangoRestorePermission
 
-__all__ = ['BaseModelViewSet']
+__all__ = ['BaseModelViewSet', 'RestoreModelMixin']
+
+
+class RestoreModelMixin:
+    """
+    Agrega `POST <recurso>/{id}/restore/` a un viewset de un modelo que herede
+    de `core.models.BaseModel`: revierte el soft delete. Requiere el permiso
+    `change_<modelo>`. Sólo ve registros eliminados (uno activo da 404).
+
+    Uso (el mixin va antes que `BaseModelViewSet`):
+
+        class WidgetViewSet(RestoreModelMixin, BaseModelViewSet):
+            ...
+    """
+
+    def get_permissions(self):
+        # Se resuelve acá y no en el kwarg `permission_classes` del @action:
+        # así vale también cuando la view se instancia sin router.
+        if self.action == 'restore':
+            return [DjangoRestorePermission()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        if self.action == 'restore':
+            return self.queryset.model.all_objects.filter(is_deleted=True)
+        return super().get_queryset()
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        instance = self.get_object()
+        try:
+            with transaction.atomic():
+                instance.restore(request.user)
+        except IntegrityError as exc:
+            raise ValidationError(
+                'No se puede restaurar: un valor único ya fue tomado por otro registro.'
+            ) from exc
+        return Response(self.get_serializer(instance).data)
 
 
 class BaseModelViewSet(viewsets.ModelViewSet):

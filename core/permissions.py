@@ -1,7 +1,7 @@
 from django.http import Http404
-from rest_framework.permissions import SAFE_METHODS, DjangoObjectPermissions
+from rest_framework.permissions import SAFE_METHODS, BasePermission, DjangoObjectPermissions
 
-__all__ = ['DjangoObjectPermissionsWithView']
+__all__ = ['DjangoObjectPermissionsWithView', 'DjangoRestorePermission']
 
 
 class DjangoObjectPermissionsWithView(DjangoObjectPermissions):
@@ -76,3 +76,19 @@ class DjangoObjectPermissionsWithView(DjangoObjectPermissions):
             return False
 
         return True
+
+
+class DjangoRestorePermission(BasePermission):
+    """
+    Permiso para restaurar un registro borrado (soft delete): exige
+    `change_<modelo>`, porque restaurar es revertir un cambio de estado y no
+    un alta (que es lo que mapearía `POST` en `DjangoObjectPermissions`).
+    """
+
+    def has_permission(self, request, view):
+        opts = view.queryset.model._meta
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.has_perm(f'{opts.app_label}.change_{opts.model_name}')
+        )

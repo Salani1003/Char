@@ -11,7 +11,7 @@ class ClientSerializer(BaseModelSerializer):
     # desacople hacía que un update con el email de un cliente borrado
     # pasara la validación y reventara con IntegrityError (500). La
     # validación real vive en `validate_email`, contra `all_objects`.
-    email = serializers.EmailField(required=False, allow_null=True, validators=[])
+    email = serializers.EmailField(validators=[])
 
     class Meta:
         model = Client
@@ -27,9 +27,6 @@ class ClientSerializer(BaseModelSerializer):
         read_only_fields = ['id', 'created_at']
 
     def validate_email(self, value):
-        if not value:
-            return value
-
         value = value.strip().lower()
         existing = Client.all_objects.filter(email__iexact=value)
         if self.instance is not None:

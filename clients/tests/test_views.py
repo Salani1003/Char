@@ -218,3 +218,38 @@ class ClientViewSetTests(TestCase):
         ):
             with self.assertRaises(ValidationError):
                 view.perform_create(serializer)
+
+
+class ClientRestoreTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.admin = User.objects.create_superuser(email='r-admin@example.com', password='pass12345')
+        self.client_obj = Client.objects.create(
+            first_name='Ada', last_name='L', email='ada@example.com', origin=Client.Origin.OTHER
+        )
+
+    def _restore(self, user, pk):
+        request = self.factory.post(f'/clients/{pk}/restore/')
+        force_authenticate(request, user=user)
+        return ClientViewSet.as_view({'post': 'restore'})(request, pk=pk)
+
+    def test_restores_deleted_client(self):
+        self.client_obj.delete(self.admin)
+        response = self._restore(self.admin, self.client_obj.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Client.objects.filter(pk=self.client_obj.pk).exists())
+
+    def test_active_client_returns_404(self):
+        self.assertEqual(self._restore(self.admin, self.client_obj.pk).status_code, 404)
+
+    def test_requires_change_permission(self):
+        from django.contrib.auth.models import Permission
+
+        self.client_obj.delete(self.admin)
+        user = User.objects.create_user(email='viewer@example.com', password='pass12345')
+        user.user_permissions.add(Permission.objects.get(codename='view_client'))
+        self.assertEqual(self._restore(user, self.client_obj.pk).status_code, 403)
+        user.user_permissions.add(Permission.objects.get(codename='change_client'))
+        user = User.objects.get(pk=user.pk)
+        response = self._restore(user, self.client_obj.pk)
+        self.assertEqual(response.status_code, 200, response.data)

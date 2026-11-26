@@ -11,19 +11,16 @@ class ClientService:
     @transaction.atomic
     def create_client(data, user=None):
         data = dict(data)
-        email = data.get('email')
-        if email:
-            email = data['email'] = email.strip().lower()
+        email = data['email'] = data['email'].strip().lower()
 
-        if email:
-            # select_for_update: bloquea la fila (si existe) hasta el commit,
-            # para que dos requests concurrentes con el mismo email no lean
-            # ambos "no existe" antes de que el primero haga commit.
-            existing = Client.all_objects.select_for_update().filter(email__iexact=email).first()
-            if existing:
-                if not existing.is_deleted:
-                    raise ValidationError('Ya existe un cliente con este email.')
-                return ClientService._restore_client(existing, data, user)
+        # select_for_update: bloquea la fila (si existe) hasta el commit,
+        # para que dos requests concurrentes con el mismo email no lean
+        # ambos "no existe" antes de que el primero haga commit.
+        existing = Client.all_objects.select_for_update().filter(email__iexact=email).first()
+        if existing:
+            if not existing.is_deleted:
+                raise ValidationError('Ya existe un cliente con este email.')
+            return ClientService._restore_client(existing, data, user)
 
         try:
             return Client.objects.create(**data, created_by=user, updated_by=user)
@@ -46,7 +43,7 @@ class ClientService:
         client.first_name = data['first_name']
         client.last_name = data['last_name']
         client.phone = data.get('phone')
-        client.email = data.get('email')
+        client.email = data['email']
         client.origin = data['origin']
         client.created_by = user
         client.set_updated_by(user)

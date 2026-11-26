@@ -30,7 +30,8 @@ class ClientSerializer(BaseModelSerializer):
         if not value:
             return value
 
-        existing = Client.all_objects.filter(email=value)
+        value = value.strip().lower()
+        existing = Client.all_objects.filter(email__iexact=value)
         if self.instance is not None:
             existing = existing.exclude(pk=self.instance.pk)
         existing = existing.first()

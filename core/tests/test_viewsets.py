@@ -230,3 +230,9 @@ class BaseModelViewSetDestroyTests(TestCase):
             if table in q['sql'] and q['sql'].strip().upper().startswith('DELETE')
         ]
         self.assertEqual(physical_deletes, [])
+
+
+class HealthTests(TestCase):
+    def test_health_ok_and_not_throttled(self):
+        for _ in range(70):
+            self.assertEqual(self.client.get('/api/health/').status_code, 200)

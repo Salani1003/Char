@@ -10,13 +10,16 @@ class ClientService:
     @staticmethod
     @transaction.atomic
     def create_client(data, user=None):
+        data = dict(data)
         email = data.get('email')
+        if email:
+            email = data['email'] = email.strip().lower()
 
         if email:
             # select_for_update: bloquea la fila (si existe) hasta el commit,
             # para que dos requests concurrentes con el mismo email no lean
             # ambos "no existe" antes de que el primero haga commit.
-            existing = Client.all_objects.select_for_update().filter(email=email).first()
+            existing = Client.all_objects.select_for_update().filter(email__iexact=email).first()
             if existing:
                 if not existing.is_deleted:
                     raise ValidationError('Ya existe un cliente con este email.')
@@ -37,11 +40,15 @@ class ClientService:
         client.deleted_at = None
         client.deleted_by = None
 
-        client.first_name = data.get('first_name', client.first_name)
-        client.last_name = data.get('last_name', client.last_name)
-        client.phone = data.get('phone', client.phone)
-        client.email = data.get('email', client.email)
-        client.origin = data.get('origin', client.origin)
+        # Se pisan TODOS los campos de datos: lo que no venga en el request
+        # queda vacío, para que el cliente nuevo no herede datos personales
+        # (teléfono, etc.) del registro borrado.
+        client.first_name = data['first_name']
+        client.last_name = data['last_name']
+        client.phone = data.get('phone')
+        client.email = data.get('email')
+        client.origin = data['origin']
+        client.created_by = user
         client.set_updated_by(user)
 
         client.save(update_fields=[
@@ -53,6 +60,7 @@ class ClientService:
             'phone',
             'email',
             'origin',
+            'created_by',
             'updated_by',
             'updated_at',
         ])

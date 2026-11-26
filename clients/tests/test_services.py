@@ -117,3 +117,23 @@ class ClientServiceTests(TestCase):
         ClientService.create_client(self._payload(), user=self.user)
 
         self.assertEqual(Client.all_objects.filter(email='ada@example.com').count(), 1)
+
+
+class ClientServiceRegressionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(email='reg@example.com', password='pass12345')
+
+    def _data(self, **kw):
+        return {'first_name': 'Ada', 'last_name': 'L', 'email': 'ada@example.com',
+                'origin': Client.Origin.OTHER, **kw}
+
+    def test_restore_does_not_inherit_old_phone(self):
+        old = Client.objects.create(**self._data(phone='111'))
+        old.delete(self.user)
+        restored = ClientService.create_client(self._data(), user=self.user)
+        self.assertIsNone(restored.phone)
+
+    def test_email_is_case_insensitive(self):
+        Client.objects.create(**self._data())
+        with self.assertRaises(ValidationError):
+            ClientService.create_client(self._data(email='ADA@Example.com'), user=self.user)

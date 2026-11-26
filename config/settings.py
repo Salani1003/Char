@@ -178,9 +178,17 @@ REST_FRAMEWORK = {
         # valores sabiendo eso, o configurar un CACHES compartido (Redis)
         # si se necesita un límite exacto.
         'login': env('THROTTLE_RATE_LOGIN', default='10/min'),
+        # Refresh y logout tienen scope propio: compartir el de `login`
+        # bloqueaba a usuarios legítimos detrás de una misma IP (NAT).
+        'refresh': env('THROTTLE_RATE_REFRESH', default='60/min'),
         'anon': env('THROTTLE_RATE_ANON', default='60/hour'),
         'user': env('THROTTLE_RATE_USER', default='1000/hour'),
     },
+    # Cantidad de proxies inversos confiables delante de la app. Sin este
+    # valor DRF toma `X-Forwarded-For` completo como identidad del cliente y
+    # cualquiera puede esquivar el throttling rotando ese header. 0 = sin
+    # proxy (se usa REMOTE_ADDR); con un proxy/load balancer, 1.
+    'NUM_PROXIES': env.int('NUM_PROXIES', default=0),
 }
 
 # rest_framework_simplejwt
@@ -206,6 +214,13 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Esquema de la API del backend de Char',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    # El esquema y Swagger/Redoc exponen toda la superficie de la API: en
+    # producción sólo para staff (sesión del admin); en dev, públicos.
+    'SERVE_PERMISSIONS': (
+        ['rest_framework.permissions.AllowAny']
+        if DEBUG
+        else ['rest_framework.permissions.IsAdminUser']
+    ),
 }
 
 # Hardening de producción

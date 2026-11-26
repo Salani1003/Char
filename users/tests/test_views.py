@@ -370,3 +370,42 @@ class UserSecurityTests(TestCase):
         self.assertEqual(response.status_code, 204)
         other.refresh_from_db()
         self.assertFalse(other.is_active)
+
+
+class TokenRevocationTests(TestCase):
+    """Desactivar al usuario o cambiarle la contraseña revoca sus refresh tokens."""
+
+    def setUp(self):
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        self.user = User.objects.create_user(email='revoke@example.com', password='pass12345')
+        self.refresh = RefreshToken.for_user(self.user)
+
+    def _refresh_status(self):
+        from rest_framework_simplejwt.exceptions import TokenError
+        from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+
+        serializer = TokenRefreshSerializer(data={'refresh': str(self.refresh)})
+        try:
+            return serializer.is_valid(raise_exception=True)
+        except TokenError:
+            return False
+        except Exception:
+            return False
+
+    def test_refresh_works_before_changes(self):
+        self.assertTrue(self._refresh_status())
+
+    def test_deactivating_user_revokes_tokens(self):
+        self.user.is_active = False
+        self.user.save()
+        self.assertFalse(self._refresh_status())
+
+    def test_changing_password_revokes_tokens(self):
+        self.user.set_password('otra-pass-9876')
+        self.user.save()
+        self.assertFalse(self._refresh_status())
+
+    def test_last_login_update_does_not_revoke(self):
+        self.user.save(update_fields=['last_login'])
+        self.assertTrue(self._refresh_status())

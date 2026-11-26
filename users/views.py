@@ -33,7 +33,7 @@ class DocumentedTokenObtainPairView(TokenObtainPairView):
 
 @TOKEN_REFRESH_SCHEMA
 class DocumentedTokenRefreshView(TokenRefreshView):
-    throttle_scope = 'login'
+    throttle_scope = 'refresh'
 
 
 @TOKEN_BLACKLIST_SCHEMA
@@ -44,6 +44,8 @@ class DocumentedTokenBlacklistView(TokenBlacklistView):
     token vivo (sigue firmado y válido hasta que expire solo, típicamente
     unos minutos) — es la limitación inherente de un JWT stateless.
     """
+
+    throttle_scope = 'refresh'
 
 
 @USER_VIEWSET_SCHEMA

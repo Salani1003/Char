@@ -147,9 +147,12 @@ per-view (e.g. `health` uses `AllowAny`).
 All settings have defaults in `config/settings.py` except `SECRET_KEY`,
 `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`. `.env.template` lists only
 those (plus `DEBUG`); the rest (`ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`,
-`EMAIL_BACKEND`, `JWT_*`, `SECURE_*`, `CSRF_TRUSTED_ORIGINS`) are optional overrides. Inside Docker, `DB_HOST` is overridden to `db` so
+`EMAIL_BACKEND`, `NUM_PROXIES` (poné 1 detrás de un proxy/LB, si no el throttling por IP no es confiable), `THROTTLE_RATE_*`, `JWT_*`, `SECURE_*`, `CSRF_TRUSTED_ORIGINS`) are optional overrides. Inside Docker, `DB_HOST` is overridden to `db` so
 the same `.env` works both locally and in Compose.
 
-### Docs
+### Seguridad de tokens / docs
 
-`docs/BACKEND.md` is the full human-readable overview of the backend (setup, concepts, API, models, pending work); `docs/TODO.md` holds the open audit findings. Keep both in sync when the API, models, roles or settings change.
+Desactivar un usuario o cambiarle la contraseña blacklistea sus refresh tokens
+(`users/signals.py`). `/api/schema|docs|redoc/` son públicos sólo con `DEBUG=True`;
+en producción exigen staff. `/health/` no tiene throttling y chequea la DB.
+Recomendado programar `manage.py flushexpiredtokens`.

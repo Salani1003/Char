@@ -87,7 +87,7 @@ class UserSerializer(serializers.ModelSerializer):
         return groups
 
     def validate_password(self, value):
-        validate_password(value)
+        validate_password(value, user=self.instance)
         return value
 
     def create(self, validated_data):

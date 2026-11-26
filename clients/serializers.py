@@ -1,9 +1,10 @@
 from rest_framework import serializers
 
 from clients.models import Client
+from core.serializers import BaseModelSerializer
 
 
-class ClientSerializer(serializers.ModelSerializer):
+class ClientSerializer(BaseModelSerializer):
     # Se desactiva el UniqueValidator automático de DRF: consulta
     # `Client._default_manager` (`objects`), que excluye los soft-deleted,
     # mientras que la constraint `unique=True` de la base sí los ve. Ese

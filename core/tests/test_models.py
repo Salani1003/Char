@@ -48,11 +48,10 @@ class SoftDeleteTests(TestCase):
         self.assertTrue(before <= self.instance.deleted_at <= after)
         self.assertEqual(self.instance.deleted_by, self.user)
 
-    def test_delete_persists_only_deletion_fields(self):
+    def test_delete_persists_deletion_and_update_fields_but_not_creation(self):
         original_created_at = self.instance.created_at
         original_created_by = self.instance.created_by
         original_updated_at = self.instance.updated_at
-        original_updated_by = self.instance.updated_by
 
         self.instance.delete(self.user)
 
@@ -61,8 +60,9 @@ class SoftDeleteTests(TestCase):
         self.assertEqual(stored.deleted_by, self.user)
         self.assertEqual(stored.created_at, original_created_at)
         self.assertEqual(stored.created_by, original_created_by)
-        self.assertEqual(stored.updated_at, original_updated_at)
-        self.assertEqual(stored.updated_by, original_updated_by)
+        # El borrado cuenta como una modificación: actualiza quién y cuándo.
+        self.assertGreater(stored.updated_at, original_updated_at)
+        self.assertEqual(stored.updated_by, self.user)
 
     def test_delete_is_idempotent(self):
         self.instance.delete(self.user)
@@ -141,19 +141,29 @@ class RestoreTests(TestCase):
         self.assertIsNone(active.deleted_at)
         self.assertIsNone(active.deleted_by)
 
-    def test_restore_does_not_modify_audit_fields(self):
+    def test_restore_does_not_modify_creation_fields_and_updates_the_rest(self):
         original_created_at = self.instance.created_at
         original_created_by = self.instance.created_by
         original_updated_at = self.instance.updated_at
-        original_updated_by = self.instance.updated_by
+        restorer = User.objects.create_user(email='restorer@example.com', password='pass12345')
 
-        self.instance.restore()
+        self.instance.restore(restorer)
 
         stored = self.ConcreteModel.all_objects.get(pk=self.instance.pk)
         self.assertEqual(stored.created_at, original_created_at)
         self.assertEqual(stored.created_by, original_created_by)
-        self.assertEqual(stored.updated_at, original_updated_at)
-        self.assertEqual(stored.updated_by, original_updated_by)
+        self.assertGreater(stored.updated_at, original_updated_at)
+        self.assertEqual(stored.updated_by, restorer)
+
+    def test_delete_and_restore_do_not_require_a_user(self):
+        # Compatibilidad con el admin de Django y librerías que llaman
+        # `delete()` sin argumentos.
+        self.instance.restore()
+        self.instance.delete()
+
+        stored = self.ConcreteModel.all_objects.get(pk=self.instance.pk)
+        self.assertTrue(stored.is_deleted)
+        self.assertIsNone(stored.deleted_by)
 
     def test_restore_makes_instance_visible_via_objects(self):
         self.instance.restore()

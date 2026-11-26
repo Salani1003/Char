@@ -41,6 +41,13 @@ No linter/formatter is configured in this repo currently.
 - `users/` — custom user app. `users.User` (`AUTH_USER_MODEL`) drops
   `username` and logs in via `email` (`USERNAME_FIELD = 'email'`), with a
   custom `UserManager` in `users/managers.py`.
+  Security invariants: emails are stored lowercase and unique
+  case-insensitively (`Lower(email)` constraint; login is `iexact`);
+  non-superusers cannot see/edit superusers and can only assign groups they
+  already hold; they also cannot modify/delete a user with more roles or
+  permissions than their own (`users/permissions.py::CanManageUser`); nobody
+  can delete or deactivate their own user. `User` is not a `BaseModel`:
+  `DELETE` just sets `is_active=False`.
 
 ### Permissions / roles system
 
@@ -78,17 +85,38 @@ backend — no bespoke role logic anywhere.
 `core/models.py` — `BaseModel` is an abstract model adding audit fields
 (`created_at`/`updated_at`, `created_by`/`updated_by`) and soft delete
 (`is_deleted`, `deleted_at`, `deleted_by`) to any model that inherits from
-it. `objects` (via `core/managers.py`'s `SoftDeleteManager`) excludes
-soft-deleted rows; `all_objects` (`AllObjectsManager`) includes everything.
-`instance.delete(user)` soft-deletes instead of removing the row;
-`instance.restore()` reverts it.
+it (`created_at`/`is_deleted` are indexed). `objects` (via
+`core/managers.py`'s `SoftDeleteManager`) excludes soft-deleted rows;
+`all_objects` (`AllObjectsManager`) includes everything.
+`instance.delete(user=None)` soft-deletes instead of removing the row;
+`instance.restore(user=None)` reverts it. Both (and `QuerySet.delete`) bump
+`updated_at`/`updated_by`, and `user` is optional so Django's admin can call
+them without arguments.
+
+- `core/serializers.py` — `BaseModelSerializer`: audit/soft-delete fields
+  forced read-only. Uniqueness convention: use
+  `core.models.unique_when_active('field', name=...)` in `Meta.constraints`
+  (unique only among non-deleted rows, so a deleted row's value can be
+  reused; the serializer validates it → 400). Plain `unique=True` still
+  works but its value is never reusable. `restore()` can raise
+  `IntegrityError` if the value was reused. (`Client.email` keeps its
+  `unique=True` + restore-on-create flow in `ClientService`.)
+- `core/admin.py` — `BaseAdmin`: register `BaseModel` models with it instead
+  of `admin.ModelAdmin` (lists deleted rows, Activos/Eliminados filter,
+  "Restaurar seleccionados" action, soft delete records `deleted_by`).
+- `core/filters.py` — `NullsLastOrderingFilter` (opt-in, nulls last in both
+  directions).
 
 `BaseModelViewSet` (`core/viewsets.py`) wires this in automatically for any
 model inheriting `BaseModel`: `perform_create`/`perform_update` set
 `created_by`/`updated_by` from `request.user` via `serializer.save(...)`,
 and `perform_destroy` calls `instance.delete(self.request.user)` — so a
 plain `DELETE` request soft-deletes and records who did it, never a
-physical `DELETE` query.
+physical `DELETE` query. It also ships `DjangoFilterBackend`, `SearchFilter`
+and `OrderingFilter` with a deterministic default `ordering = ['-created_at', '-id']`
+(`OrderingFilter` makes the view's `ordering` win over the queryset's
+`order_by`, so a viewset that wants another order must set `ordering`, as
+`CategoriaViewSet` does).
 
 ### OpenAPI docs convention
 

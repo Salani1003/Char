@@ -1,8 +1,6 @@
 from django.contrib.auth.models import Group
 from rest_framework import viewsets
-from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
-from rest_framework.filters import SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import (
@@ -14,6 +12,7 @@ from rest_framework_simplejwt.views import (
 from core.permissions import DjangoObjectPermissionsWithView
 from core.viewsets import BaseModelViewSet
 from users.models import User
+from users.permissions import CanManageUser
 from users.schemas import (
     GROUP_VIEWSET_SCHEMA,
     ME_SCHEMA,
@@ -56,11 +55,21 @@ class UserViewSet(BaseModelViewSet):
     chequeados por `DjangoObjectPermissionsWithView` vía `BaseModelViewSet`).
     """
 
-    queryset = User.objects.all().order_by('id')
+    queryset = User.objects.prefetch_related('groups')
     serializer_class = UserSerializer
-    filter_backends = [DjangoFilterBackend, SearchFilter]
+    permission_classes = [DjangoObjectPermissionsWithView, CanManageUser]
     filterset_fields = ['is_active']
+    ordering = ['id']
     search_fields = ['first_name', 'last_name', 'email']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        # Anti-toma de cuentas: quien no es superuser no puede ver ni
+        # modificar superusers (cambiar su password/email o desactivarlos).
+        # Los demás límites de escritura viven en `CanManageUser`.
+        if not self.request.user.is_superuser:
+            queryset = queryset.filter(is_superuser=False)
+        return queryset
 
     def perform_create(self, serializer):
         serializer.save()

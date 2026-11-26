@@ -1,9 +1,10 @@
 from rest_framework import serializers
 
+from core.serializers import BaseModelSerializer
 from products.models import Categoria
 
 
-class CategoriaSerializer(serializers.ModelSerializer):
+class CategoriaSerializer(BaseModelSerializer):
     class Meta:
         model = Categoria
         fields = [

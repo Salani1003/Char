@@ -67,7 +67,7 @@ class ClientViewSetTests(TestCase):
         response = self._list()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data['results']), 2)
 
     def test_list_excludes_deleted_clients(self):
         client = self._build(email='ada@example.com')
@@ -76,7 +76,7 @@ class ClientViewSetTests(TestCase):
         response = self._list()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(len(response.data['results']), 0)
 
     def test_retrieve_returns_active_client(self):
         client = self._build(email='ada@example.com')
@@ -167,8 +167,8 @@ class ClientViewSetTests(TestCase):
         response = self._list({'search': 'grace'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['email'], 'grace@example.com')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['email'], 'grace@example.com')
 
     def test_list_orders_by_first_name_ascending(self):
         self._build(first_name='Grace', last_name='Hopper', email='grace@example.com')
@@ -177,7 +177,7 @@ class ClientViewSetTests(TestCase):
         response = self._list({'ordering': 'first_name'})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([row['first_name'] for row in response.data], ['Ada', 'Grace'])
+        self.assertEqual([row['first_name'] for row in response.data['results']], ['Ada', 'Grace'])
 
     def test_list_orders_by_created_at_descending_by_default(self):
         first = self._build(first_name='Ada', last_name='Lovelace', email='ada@example.com')
@@ -186,7 +186,7 @@ class ClientViewSetTests(TestCase):
         response = self._list()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([row['id'] for row in response.data], [second.id, first.id])
+        self.assertEqual([row['id'] for row in response.data['results']], [second.id, first.id])
 
     def test_update_with_email_of_soft_deleted_client_returns_400_not_500(self):
         deleted = self._build(email='deleted@example.com')

@@ -6,5 +6,6 @@ from products.serializers import CategoriaSerializer
 
 @CATEGORIA_VIEWSET_SCHEMA
 class CategoriaViewSet(BaseModelViewSet):
-    queryset = Categoria.objects.all().order_by('nombre')
+    queryset = Categoria.objects.all()
+    ordering = ['nombre']
     serializer_class = CategoriaSerializer

@@ -194,3 +194,45 @@ class SoftDeleteManagerTests(TestCase):
 
         self.assertTrue(self.ConcreteModel.all_objects.filter(pk=self.active.pk).exists())
         self.assertTrue(self.ConcreteModel.all_objects.filter(pk=self.deleted.pk).exists())
+
+
+@isolate_apps('core')
+class SoftDeleteQuerySetAuditTests(TestCase):
+    """`QuerySet.delete()` bumpea `updated_at/updated_by` y no exige usuario."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        class QuerySetAuditModel(BaseModel):
+            class Meta:
+                app_label = 'core'
+
+        cls.ConcreteModel = QuerySetAuditModel
+        with connection.schema_editor() as editor:
+            editor.create_model(cls.ConcreteModel)
+
+    @classmethod
+    def tearDownClass(cls):
+        with connection.schema_editor() as editor:
+            editor.delete_model(cls.ConcreteModel)
+        super().tearDownClass()
+
+    def test_queryset_delete_updates_updated_fields(self):
+        user = User.objects.create_user(email='bulk@example.com', password='pass12345')
+        instance = self.ConcreteModel.objects.create()
+        original_updated_at = instance.updated_at
+
+        self.ConcreteModel.objects.filter(pk=instance.pk).delete(user)
+
+        stored = self.ConcreteModel.all_objects.get(pk=instance.pk)
+        self.assertGreater(stored.updated_at, original_updated_at)
+        self.assertEqual(stored.updated_by, user)
+
+    def test_queryset_delete_without_user_is_allowed(self):
+        # El admin de Django llama `queryset.delete()` sin argumentos.
+        instance = self.ConcreteModel.objects.create()
+
+        self.ConcreteModel.objects.filter(pk=instance.pk).delete()
+
+        self.assertTrue(self.ConcreteModel.all_objects.get(pk=instance.pk).is_deleted)

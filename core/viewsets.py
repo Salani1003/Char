@@ -1,4 +1,6 @@
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets
+from rest_framework.filters import OrderingFilter, SearchFilter
 
 from core.pagination import DefaultPagination
 from core.permissions import DjangoObjectPermissionsWithView
@@ -18,6 +20,9 @@ class BaseModelViewSet(viewsets.ModelViewSet):
       * Permisos a nivel de objeto: listos para activarse en cuanto se
         configure un backend de permisos de objeto (ej. `django-guardian`);
         no hace falta tocar nada acá cuando eso pase.
+      * Filtros (`filterset_fields`), búsqueda (`search_fields`) y orden
+        (`?ordering=`, por defecto `-created_at`) listos para configurar
+        por viewset.
       * Paginación por página vía `DefaultPagination` (20 resultados por
         página, ajustable con `?page_size=` hasta un máximo de 100).
 
@@ -30,6 +35,10 @@ class BaseModelViewSet(viewsets.ModelViewSet):
 
     permission_classes = [DjangoObjectPermissionsWithView]
     pagination_class = DefaultPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    # Orden determinista: sin él, la paginación puede repetir/saltear filas.
+    # Los modelos que no tengan `created_at` deben sobreescribirlo.
+    ordering = ['-created_at', '-id']
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)

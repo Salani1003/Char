@@ -6,10 +6,15 @@ class UserManager(BaseUserManager):
 
     use_in_migrations = True
 
+    def get_by_natural_key(self, username):
+        # Login case-insensitive: el email se guarda en minúsculas, pero
+        # `Juan@X.com` tiene que poder loguearse igual.
+        return self.get(**{f'{self.model.USERNAME_FIELD}__iexact': username})
+
     def _create_user(self, email, password, **extra_fields):
         if not email:
             raise ValueError('El email es obligatorio')
-        email = self.normalize_email(email)
+        email = self.normalize_email(email).lower()
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)

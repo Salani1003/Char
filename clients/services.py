@@ -54,6 +54,7 @@ class ClientService:
             'email',
             'origin',
             'updated_by',
+            'updated_at',
         ])
 
         return client

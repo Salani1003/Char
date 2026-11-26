@@ -2,6 +2,7 @@ from unittest import mock
 
 from django.core.cache import cache
 from django.test import TestCase
+from django.urls import reverse
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.throttling import SimpleRateThrottle
 
@@ -235,3 +236,137 @@ class TokenBlacklistTests(TestCase):
         response = self._blacklist(refresh)
 
         self.assertEqual(response.status_code, 401)
+
+
+class UserSecurityTests(TestCase):
+    """Anti-toma de cuentas, anti-escalada de roles y email case-insensitive."""
+
+    def setUp(self):
+        from django.contrib.auth.models import Group, Permission
+        from rest_framework.test import APIClient
+
+        self.role = Group.objects.create(name='Gestor')
+        self.other_role = Group.objects.create(name='Otro')
+        self.role.permissions.set(Permission.objects.filter(
+            content_type__app_label='users', content_type__model='user',
+        ))
+        self.manager = User.objects.create_user(email='mgr@example.com', password='pass12345')
+        self.manager.groups.add(self.role)
+        self.superuser = User.objects.create_superuser(email='root@example.com', password='pass12345')
+        self.client = APIClient()
+        self.client.force_authenticate(self.manager)
+
+    def test_non_superuser_cannot_see_or_edit_superusers(self):
+        url = reverse('user-detail', args=[self.superuser.pk])
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.patch(url, {'password': 'Nuev4Clave!x'}).status_code, 404)
+        emails = [u['email'] for u in self.client.get(reverse('user-list')).json()['results']]
+        self.assertNotIn('root@example.com', emails)
+
+    def test_non_superuser_cannot_assign_groups_they_lack(self):
+        response = self.client.patch(
+            reverse('user-detail', args=[self.manager.pk]), {'groups': [self.other_role.pk]}, format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('groups', response.json())
+
+    def test_non_superuser_can_assign_groups_they_hold(self):
+        response = self.client.patch(
+            reverse('user-detail', args=[self.manager.pk]), {'groups': [self.role.pk]}, format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_email_is_stored_lowercase_and_unique_case_insensitively(self):
+        response = self.client.post(
+            reverse('user-list'), {'email': 'New@Example.COM', 'password': 'Cl4ve-segura!'}, format='json',
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['email'], 'new@example.com')
+        duplicate = self.client.post(
+            reverse('user-list'), {'email': 'NEW@example.com', 'password': 'Cl4ve-segura!'}, format='json',
+        )
+        self.assertEqual(duplicate.status_code, 400)
+
+    def test_login_is_case_insensitive(self):
+        from rest_framework.test import APIClient
+
+        response = APIClient().post(
+            reverse('token_obtain_pair'), {'email': 'MGR@Example.com', 'password': 'pass12345'}, format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def _make_user(self, email, *groups, **extra):
+        user = User.objects.create_user(email=email, password='pass12345', **extra)
+        user.groups.add(*groups)
+        return user
+
+    def test_cannot_take_over_a_user_with_more_roles(self):
+        # `admin_like` tiene el rol del gestor y además otro: el gestor NO puede tocarlo.
+        admin_like = self._make_user('admin@example.com', self.role, self.other_role)
+        url = reverse('user-detail', args=[admin_like.pk])
+
+        self.assertEqual(self.client.patch(url, {'password': 'Nuev4Clave!x'}).status_code, 403)
+        self.assertEqual(self.client.patch(url, {'email': 'robado@example.com'}).status_code, 403)
+        self.assertEqual(self.client.patch(url, {'groups': [self.role.pk]}, format='json').status_code, 403)
+        self.assertEqual(self.client.delete(url).status_code, 403)
+
+        admin_like.refresh_from_db()
+        self.assertEqual(admin_like.email, 'admin@example.com')
+        self.assertTrue(admin_like.is_active)
+        self.assertEqual(admin_like.groups.count(), 2)
+        self.assertTrue(admin_like.check_password('pass12345'))
+
+    def test_can_still_read_users_with_more_roles(self):
+        admin_like = self._make_user('admin@example.com', self.role, self.other_role)
+        response = self.client.get(reverse('user-detail', args=[admin_like.pk]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_cannot_take_over_a_user_with_extra_direct_permissions(self):
+        from django.contrib.auth.models import Permission
+
+        target = self._make_user('direct@example.com', self.role)
+        target.user_permissions.add(Permission.objects.get(codename='add_group'))
+        response = self.client.patch(reverse('user-detail', args=[target.pk]), {'first_name': 'X'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_can_manage_users_with_equal_or_fewer_roles(self):
+        peer = self._make_user('peer@example.com', self.role)
+        plain = self._make_user('plain@example.com')
+
+        for user in (peer, plain):
+            url = reverse('user-detail', args=[user.pk])
+            self.assertEqual(self.client.patch(url, {'first_name': 'Nuevo'}).status_code, 200)
+        self.assertEqual(self.client.delete(reverse('user-detail', args=[plain.pk])).status_code, 204)
+
+    def test_superuser_can_manage_users_with_any_roles(self):
+        target = self._make_user('multi@example.com', self.role, self.other_role)
+        self.client.force_authenticate(self.superuser)
+        response = self.client.patch(reverse('user-detail', args=[target.pk]), {'first_name': 'Nuevo'})
+        self.assertEqual(response.status_code, 200)
+
+    def test_cannot_delete_own_user(self):
+        response = self.client.delete(reverse('user-detail', args=[self.manager.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.manager.refresh_from_db()
+        self.assertTrue(self.manager.is_active)
+
+    def test_superuser_cannot_delete_own_user(self):
+        self.client.force_authenticate(self.superuser)
+        response = self.client.delete(reverse('user-detail', args=[self.superuser.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_cannot_deactivate_own_user_via_patch(self):
+        response = self.client.patch(
+            reverse('user-detail', args=[self.manager.pk]), {'is_active': False}, format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('is_active', response.json())
+        self.manager.refresh_from_db()
+        self.assertTrue(self.manager.is_active)
+
+    def test_can_deactivate_another_user(self):
+        other = self._make_user('other@example.com')
+        response = self.client.delete(reverse('user-detail', args=[other.pk]))
+        self.assertEqual(response.status_code, 204)
+        other.refresh_from_db()
+        self.assertFalse(other.is_active)

@@ -1,6 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError
-from rest_framework.filters import OrderingFilter, SearchFilter
 from clients.models import Client
 from clients.schemas import CLIENT_VIEWSET_SCHEMA
 from clients.serializers import ClientSerializer
@@ -12,7 +11,6 @@ from core.viewsets import BaseModelViewSet
 class ClientViewSet(BaseModelViewSet):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
-    filter_backends = [OrderingFilter, SearchFilter]
     ordering = ['-created_at']
     search_fields = ["first_name", "last_name", "email"]
 

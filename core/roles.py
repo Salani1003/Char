@@ -70,6 +70,10 @@ ROLES: dict[str, list[str]] = {
         "products.view_productvariant",
         "products.change_productvariant",
         "products.delete_productvariant",
+        "products.add_productimage",
+        "products.view_productimage",
+        "products.change_productimage",
+        "products.delete_productimage",
     ],
     "Vendedor": [
         "clients.add_client",
@@ -82,5 +86,6 @@ ROLES: dict[str, list[str]] = {
         "products.view_size",
         "products.view_product",
         "products.view_productvariant",
+        "products.view_productimage",
     ],
 }

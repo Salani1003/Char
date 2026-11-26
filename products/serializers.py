@@ -1,13 +1,23 @@
 import copy
+import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Max
 from rest_framework import serializers
 
-from core.serializers import BaseModelSerializer
+from core.exceptions import ImageStorageUnavailable, ImageUploadFailed
+from core.media import ImageStorageError, ImageStorageNotConfigured, get_image_storage, validate_image_upload
+from core.serializers import AUDIT_FIELDS, BaseModelSerializer
+from products.services import clear_primary_images
 from products.slugs import generate_unique_slug
 from products.text import normalize_name
-from products.models import Brand, Category, Color, Product, ProductModel, ProductVariant, Size
+from products.models import Brand, Category, Color, Product, ProductImage, ProductModel, ProductVariant, Size
+
+logger = logging.getLogger(__name__)
+
+THUMBNAIL_SIZE = 400
 
 __all__ = [
     'CategorySerializer',
@@ -18,6 +28,7 @@ __all__ = [
     'ProductSerializer',
     'ProductVariantSerializer',
     'ProductWithVariantsSerializer',
+    'ProductImageSerializer',
 ]
 
 
@@ -387,11 +398,13 @@ class ProductVariantSerializer(BaseModelSerializer):
     promo_end = serializers.DateField(source='product.promo_end', read_only=True)
     current_price = serializers.SerializerMethodField()
     is_on_promo = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField(help_text='Primera imagen del producto en el color de la variante, o null.')
+    thumbnail_url = serializers.SerializerMethodField(help_text='Miniatura (400x400) de esa imagen, o null.')
 
     class Meta:
         model = ProductVariant
         fields = [
-            'id', 'sku', 'created_at',
+            'id', 'sku', 'created_at', 'image_url', 'thumbnail_url',
             'product', 'product_name', 'is_published',
             'category', 'category_label', 'brand', 'brand_name', 'product_model', 'product_model_name',
             'color', 'color_name', 'color_hex', 'size', 'size_name',
@@ -405,9 +418,40 @@ class ProductVariantSerializer(BaseModelSerializer):
     def get_is_on_promo(self, obj) -> bool:
         return obj.product.is_on_promo()
 
+    def _image_key(self, obj) -> str | None:
+        # El viewset lo anota en el listado; fuera de él (ej. la respuesta de un alta) se consulta.
+        if hasattr(obj, 'image_key'):
+            return obj.image_key
+        first = ProductImage.objects.filter(product_id=obj.product_id, color_id=obj.color_id).order_by('-is_primary', 'sort_order', 'id')
+        return first.values_list('storage_key', flat=True).first()
+
+    def get_image_url(self, obj) -> str | None:
+        key = self._image_key(obj)
+        return (get_image_storage().url(key) or None) if key else None
+
+    def get_thumbnail_url(self, obj) -> str | None:
+        key = self._image_key(obj)
+        return (get_image_storage().url(key, width=THUMBNAIL_SIZE, height=THUMBNAIL_SIZE) or None) if key else None
+
     def validate_product(self, value):
         if self.instance is not None and value.pk != self.instance.product_id:
             raise serializers.ValidationError('No se puede cambiar el producto de una variante.')
+        return value
+
+    def validate_color(self, value):
+        # Mientras el producto está publicado tiene que quedar al menos una variante con foto.
+        instance = self.instance
+        if instance is not None and value.pk != instance.color_id:
+            product = instance.product
+            if (
+                product.is_published
+                and product.has_variant_with_image()
+                and not product.has_variant_with_image(without_variant=instance.pk, with_color=value)
+            ):
+                raise serializers.ValidationError(
+                    'No se puede cambiar el color de la última variante con foto de un producto publicado. '
+                    'Despublicá el producto primero.'
+                )
         return value
 
     def validate(self, attrs):
@@ -435,13 +479,135 @@ class _VariantSummarySerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ProductImageSerializer(BaseModelSerializer):
+    """
+    La imagen se sube por la API (multipart, campo `file`): el backend la valida y la envía al
+    proveedor, y guarda sólo la clave resultante en `storage_key` (de sólo lectura: el cliente
+    nunca elige qué clave registra). No se puede reemplazar el archivo de una imagen existente
+    (se borra y se sube otra) ni cambiar su producto. Si no llega `sort_order`, queda al final
+    de la galería de ese producto-color. `is_primary` marca la imagen principal de su
+    producto-color (una sola: al marcar una se desmarca la anterior).
+    """
+
+    file = serializers.FileField(write_only=True, required=False, help_text='Imagen JPEG, PNG o WEBP (multipart).')
+    url = serializers.SerializerMethodField(help_text='URL pública de la imagen.')
+    thumbnail_url = serializers.SerializerMethodField(help_text='URL de la miniatura (400x400, recortada).')
+    color_name = serializers.CharField(source='color.name', read_only=True)
+    color_hex = serializers.CharField(source='color.hex', read_only=True)
+
+    class Meta:
+        model = ProductImage
+        fields = [
+            'id', 'product', 'color', 'color_name', 'color_hex', 'file', 'storage_key', 'url', 'thumbnail_url',
+            'alt_text', 'sort_order', 'is_primary', *AUDIT_FIELDS,
+        ]
+        read_only_fields = ['storage_key']
+        extra_kwargs = {'sort_order': {'required': False}}
+
+    def validate_file(self, file):
+        try:
+            validate_image_upload(file)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return file
+
+    def validate_product(self, value):
+        if self.instance is not None and value.pk != self.instance.product_id:
+            raise serializers.ValidationError('No se puede cambiar el producto de una imagen.')
+        return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance is None and 'file' not in attrs:
+            raise serializers.ValidationError({'file': 'Este campo es obligatorio.'})
+        if self.instance is not None and 'file' in attrs:
+            raise serializers.ValidationError({'file': 'No se puede reemplazar el archivo: elimine la imagen y suba otra.'})
+        return attrs
+
+    def get_url(self, obj) -> str | None:
+        return get_image_storage().url(obj.storage_key) or None
+
+    def get_thumbnail_url(self, obj) -> str | None:
+        return get_image_storage().url(obj.storage_key, width=THUMBNAIL_SIZE, height=THUMBNAIL_SIZE) or None
+
+    def validate_color(self, value):
+        # Mientras el producto está publicado tiene que quedar al menos una variante con foto.
+        instance = self.instance
+        if instance is not None and value.pk != instance.color_id:
+            product = instance.product
+            if (
+                product.is_published
+                and product.has_variant_with_image()
+                and not product.has_variant_with_image(without_image=instance.pk)
+                and not product.variants.filter(is_deleted=False, color=value).exists()
+            ):
+                raise serializers.ValidationError(
+                    'No se puede cambiar el color de la última foto de un producto publicado: tiene que '
+                    'quedar al menos una variante con foto. Despublicá el producto primero.'
+                )
+        return value
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        if validated_data.get('is_primary', instance.is_primary):
+            clear_primary_images(
+                validated_data.get('product', instance.product),
+                validated_data.get('color', instance.color),
+                exclude_pk=instance.pk,
+            )
+        return super().update(instance, validated_data)
+
+    def create(self, validated_data):
+        file = validated_data.pop('file')
+        product = validated_data['product']
+        storage = get_image_storage()
+        folder = f'{settings.IMAGE_FOLDER}/products/{product.pk}'
+        try:
+            key = storage.upload(file, folder)
+        except ImageStorageNotConfigured as exc:
+            raise ImageStorageUnavailable() from exc
+        except ImageStorageError as exc:
+            raise ImageUploadFailed() from exc
+        try:
+            with transaction.atomic():
+                if validated_data.get('is_primary'):
+                    clear_primary_images(product, validated_data['color'])
+                if 'sort_order' not in validated_data:
+                    last = ProductImage.objects.filter(product=product, color=validated_data['color']).aggregate(
+                        last=Max('sort_order')
+                    )['last']
+                    validated_data['sort_order'] = 0 if last is None else last + 1
+                return super().create(dict(validated_data, storage_key=key))
+        except Exception:
+            # La subida a un servicio externo no se revierte sola con la transacción: si no se
+            # pudo registrar la imagen, se limpia el archivo para no dejarlo huérfano.
+            try:
+                storage.delete(key)
+            except ImageStorageError:
+                logger.warning('Quedó una imagen huérfana en el almacenamiento: %s', key)
+            raise
+
+
+class _ProductImageSummarySerializer(ProductImageSerializer):
+    """Imagen anidada en el producto: sólo lo que necesita la tienda para mostrarla."""
+
+    class Meta(ProductImageSerializer.Meta):
+        fields = ['id', 'color', 'url', 'thumbnail_url', 'alt_text', 'sort_order', 'is_primary']
+        read_only_fields = fields
+
+
 class ProductWithVariantsSerializer(ProductSerializer):
     """
     `ProductSerializer` más `variants` (sólo las activas, de sólo lectura,
-    ordenadas por color y talle). Mismas reglas del costo que el producto.
+    ordenadas por color y talle) e `images` (las activas, por color: la principal primero y después por orden).
+    Mismas reglas del costo que el producto.
     """
 
     variants = _VariantSummarySerializer(many=True, read_only=True)
+    images = _ProductImageSummarySerializer(many=True, read_only=True)
+
+    class Meta(ProductSerializer.Meta):
+        fields = [*ProductSerializer.Meta.fields, 'images']
 
     def _include_variants(self, user) -> bool:
         return True  # el endpoint ya exige `view_productvariant`

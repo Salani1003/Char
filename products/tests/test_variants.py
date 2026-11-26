@@ -5,7 +5,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from products.models import Category, Color, Product, ProductVariant, Size, SkuCounter
+from products.models import Category, Color, Product, ProductImage, ProductVariant, Size, SkuCounter
 from users.models import User
 
 
@@ -23,6 +23,11 @@ class VariantFixtureMixin:
         data = {'product': self.product, 'color': self.blue, 'size': self.m}
         data.update(kw)
         return ProductVariant.objects.create(**data)
+
+    def add_image(self, color=None, **kw):
+        data = {'product': self.product, 'color': color or self.blue, 'storage_key': 'test/foto'}
+        data.update(kw)
+        return ProductImage.objects.create(**data)
 
 
 class VariantModelTests(VariantFixtureMixin, TestCase):
@@ -268,10 +273,55 @@ class PublishRequiresVariantsTests(VariantFixtureMixin, TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('is_published', response.data)
 
-    def test_can_publish_with_active_variant(self):
+    def test_can_publish_with_active_variant_that_has_a_photo(self):
         self.make()
+        self.add_image()
         self.assertEqual(self.publish().status_code, 200)
         self.assertTrue(Product.objects.get(pk=self.product.pk).is_published)
+
+    def test_cannot_publish_with_variants_but_no_photo(self):
+        self.make()
+        response = self.publish()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('foto', str(response.data['is_published']))
+        self.assertFalse(Product.objects.get(pk=self.product.pk).is_published)
+
+    def test_one_variant_with_photo_is_enough(self):
+        self.make()
+        self.make(color=self.red)
+        self.add_image(self.red)
+        self.assertEqual(self.publish().status_code, 200)
+
+    def test_photo_of_a_color_without_variants_does_not_count(self):
+        self.make()  # azul
+        self.add_image(self.red)
+        self.assertEqual(self.publish().status_code, 400)
+
+    def test_photo_of_another_product_does_not_count(self):
+        other = Product.objects.create(name='Otro', category=self.category, sale_price=Decimal('10'))
+        self.make()
+        self.add_image(product=other)
+        self.assertEqual(self.publish().status_code, 400)
+
+    def test_deleted_photo_does_not_count(self):
+        self.make()
+        self.add_image().delete()
+        self.assertEqual(self.publish().status_code, 400)
+
+    def test_deleted_variant_with_photo_does_not_count(self):
+        self.make().delete()
+        self.make(color=self.red)
+        self.add_image(self.blue)
+        self.assertEqual(self.publish().status_code, 400)
+
+    def test_photo_rule_applies_only_when_publishing(self):
+        # Un producto que ya estaba publicado (sin fotos) se puede seguir editando y despublicar.
+        self.make()
+        Product.objects.filter(pk=self.product.pk).update(is_published=True)
+        response = self.api.patch(self.url, {'description': 'Nueva'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.publish(False).status_code, 200)
+        self.assertEqual(self.publish().status_code, 400)  # y para volver a publicar sí pide foto
 
     def test_deleted_variants_do_not_count(self):
         self.make().delete()
@@ -279,6 +329,7 @@ class PublishRequiresVariantsTests(VariantFixtureMixin, TestCase):
 
     def test_unpublishing_always_allowed(self):
         v = self.make()
+        self.add_image()
         self.publish()
         v.is_deleted = True  # estado inconsistente heredado: igual se puede despublicar
         v.save(update_fields=['is_deleted'])
@@ -286,6 +337,7 @@ class PublishRequiresVariantsTests(VariantFixtureMixin, TestCase):
 
     def test_editing_published_product_still_works(self):
         self.make()
+        self.add_image()
         self.publish()
         response = self.api.patch(self.url, {'description': 'Nueva'}, format='json')
         self.assertEqual(response.status_code, 200, response.data)
@@ -293,6 +345,8 @@ class PublishRequiresVariantsTests(VariantFixtureMixin, TestCase):
     def test_cannot_delete_last_variant_of_published_product(self):
         a = self.make()
         b = self.make(color=self.red)
+        self.add_image()
+        self.add_image(self.red)
         self.publish()
         self.assertEqual(self.api.delete(f'/api/product-variants/{a.pk}/').status_code, 204)
         response = self.api.delete(f'/api/product-variants/{b.pk}/')
@@ -301,6 +355,7 @@ class PublishRequiresVariantsTests(VariantFixtureMixin, TestCase):
 
     def test_can_delete_last_variant_after_unpublishing(self):
         v = self.make()
+        self.add_image()
         self.publish()
         self.publish(False)
         self.assertEqual(self.api.delete(f'/api/product-variants/{v.pk}/').status_code, 204)

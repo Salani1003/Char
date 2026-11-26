@@ -243,3 +243,17 @@ if not DEBUG:
 
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
+
+# --- Imágenes (productos) ---------------------------------------------------
+# El almacenamiento de imágenes está detrás de un adaptador (`core.media`):
+# cambiar de proveedor es escribir otra clase `ImageStorage` y apuntar
+# `IMAGE_STORAGE` hacia ella. Las credenciales de Cloudinary salen del
+# entorno; sin ellas la API de imágenes responde 503 y el resto del sistema
+# funciona igual.
+IMAGE_STORAGE = env('IMAGE_STORAGE', default='core.media.CloudinaryImageStorage')
+CLOUDINARY_CLOUD_NAME = env('CLOUDINARY_CLOUD_NAME', default='')
+CLOUDINARY_API_KEY = env('CLOUDINARY_API_KEY', default='')
+CLOUDINARY_API_SECRET = env('CLOUDINARY_API_SECRET', default='')
+# Carpeta raíz en Cloudinary: permite separar dev/staging/prod en una misma cuenta.
+IMAGE_FOLDER = env('IMAGE_FOLDER', default='char')
+IMAGE_MAX_BYTES = env.int('IMAGE_MAX_BYTES', default=5 * 1024 * 1024)

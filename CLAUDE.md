@@ -23,6 +23,9 @@ python manage.py test
 python manage.py test users              # single app
 python manage.py test users.tests.SomeTestCase.test_something   # single test
 
+# Verifica las credenciales de Cloudinary: sube un PNG de 1x1, lo muestra y lo borra
+python manage.py check_image_storage
+
 # Roles: seed Groups/Permissions from core/roles.py (idempotent)
 python manage.py seed_roles
 
@@ -91,7 +94,8 @@ No linter/formatter is configured in this repo currently.
   ante carreras (`AutoSlugMixin`), y `SlugFallbackMixin` cubre admin/shell/tests. No
   cambian al renombrar; `slug: ""` en un PATCH de producto lo regenera sólo si no está
   publicado. `Product.is_published` (default `false`, filtrable) marca si va a la tienda y sólo se
-  activa con ≥1 variante activa (no se puede crear ya publicado; no se elimina la última
+  activa con ≥1 variante activa **que tenga foto** (una `ProductImage` activa de su color; la
+  exigencia rige al pasar a publicado, no se revalida al editar uno ya publicado) (no se puede crear ya publicado; mientras esté publicado tampoco se puede dejar sin ninguna variante con foto: no se elimina ni se cambia de color la última foto o la última variante con foto; no se elimina la última
   variante de un producto publicado — ambas reglas sólo en la API/`clean`, no en el admin masivo).
   Mismo criterio que `Cali/cali_backend`.
   `GET product-variants/` es la grilla de variantes: cada fila trae nombres (producto, color
@@ -108,6 +112,24 @@ No linter/formatter is configured in this repo currently.
   anidados; exige `view_product` y `view_productvariant`); `GET products/{id}/` no las incluye.
   No se borra categoría/marca/modelo con productos activos, ni producto/color/talle
   con variantes activas.
+
+- `core/media.py` — adaptador de almacenamiento de imágenes: `ImageStorage`
+  (`upload`/`delete`/`url`) + `CloudinaryImageStorage`, elegido con `settings.IMAGE_STORAGE`
+  (ruta de la clase). El dominio sólo habla con `get_image_storage()`; cambiar de proveedor es
+  escribir otra subclase y apuntar la setting. `validate_image_upload` valida por contenido
+  (JPEG/PNG/WEBP, `IMAGE_MAX_BYTES`). Sin credenciales la API de imágenes responde 503 (errores en
+  `core/exceptions.py`). Tests: `core.tests.fakes.FakeImageStorage` (con `override_settings(IMAGE_STORAGE=...)`).
+- `ProductImage` (`product-images`): imagen de un producto **en un color** (producto + color
+  obligatorios, sin depender del talle ni de que exista la variante); varias por producto-color,
+  ordenadas con la principal (`is_primary`) primero y después por `sort_order` (si no llega, al final de esa galería). Una sola principal por producto-color (índice único parcial): al marcarla en el alta o en un PATCH (también al cambiar de color) se desmarca la anterior; la primera subida no queda principal sola y borrar la principal no promueve otra. Se sube por `multipart`
+  (`file`, una por request); el backend la envía al proveedor y guarda sólo `storage_key` (de
+  lectura; `url`/`thumbnail_url` se arman con el adaptador). El archivo y el producto no cambian
+  (se borra y se sube otra); `color`, `alt_text` y `sort_order` sí. `DELETE` borra primero el
+  archivo del proveedor (si falla: 502 y no se elimina) y no es restaurable. No se elimina un
+  producto ni un color con imágenes activas. `GET products/{id}/with-variants/` trae `images`.
+  La grilla `product-variants` trae `image_url`/`thumbnail_url` (la principal del producto en el
+  color de la variante o, si no hay, la de menor orden; `null` si no hay; subconsulta anotada, sin consultas por fila).
+  El admin es de sólo consulta. Cloudinary: `CLOUDINARY_*`, `IMAGE_FOLDER` (default `char`).
 
 ### Permissions / roles system
 

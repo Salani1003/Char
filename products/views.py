@@ -1,17 +1,22 @@
-from django.db.models import Case, Count, DecimalField, Exists, F, IntegerField, OuterRef, Prefetch, Q, Value, When
+from django.db.models import Case, Count, DecimalField, Exists, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from core.exceptions import ImageDeleteFailed, ImageStorageUnavailable
+from core.media import ImageStorageError, ImageStorageNotConfigured
 from core.viewsets import BaseModelViewSet, RestoreModelMixin
 from products.filters import effective_price, CategoryFilter, ProductFilter, ProductModelFilter, ProductVariantFilter
-from products.models import Brand, Category, Color, Product, ProductModel, ProductVariant, Size
+from products.models import Brand, Category, Color, Product, ProductImage, ProductModel, ProductVariant, Size
+from products.services import delete_image
 from products.schemas import (
     BRAND_VIEWSET_SCHEMA,
     CATEGORY_VIEWSET_SCHEMA,
     COLOR_VIEWSET_SCHEMA,
+    PRODUCT_IMAGE_VIEWSET_SCHEMA,
     PRODUCT_MODEL_VIEWSET_SCHEMA,
     PRODUCT_VARIANT_VIEWSET_SCHEMA,
     PRODUCT_VIEWSET_SCHEMA,
@@ -21,6 +26,7 @@ from products.serializers import (
     BrandSerializer,
     CategorySerializer,
     ColorSerializer,
+    ProductImageSerializer,
     ProductModelSerializer,
     ProductSerializer,
     ProductVariantSerializer,
@@ -106,6 +112,8 @@ class ColorViewSet(RestoreModelMixin, BaseModelViewSet):
     def perform_destroy(self, instance):
         if instance.variants.filter(is_deleted=False).exists():
             raise ValidationError('No se puede eliminar un color que tiene variantes.')
+        if instance.images.filter(is_deleted=False).exists():
+            raise ValidationError('No se puede eliminar un color que tiene imágenes.')
         super().perform_destroy(instance)
 
 
@@ -134,6 +142,8 @@ class ProductViewSet(RestoreModelMixin, BaseModelViewSet):
     def perform_destroy(self, instance):
         if instance.variants.filter(is_deleted=False).exists():
             raise ValidationError('No se puede eliminar un producto que tiene variantes.')
+        if instance.images.filter(is_deleted=False).exists():
+            raise ValidationError('No se puede eliminar un producto que tiene imágenes.')
         super().perform_destroy(instance)
 
     @action(detail=True, methods=['get'], url_path='with-variants')
@@ -156,7 +166,11 @@ class ProductViewSet(RestoreModelMixin, BaseModelViewSet):
                     queryset=ProductVariant.objects.select_related('color', 'size').order_by(
                         'color__name', 'size__order', 'id'
                     ),
-                )
+                ),
+                Prefetch(
+                    'images',
+                    queryset=ProductImage.objects.order_by('color__name', '-is_primary', 'sort_order', 'id'),
+                ),
             )
         if self.action == 'list':
             queryset = queryset.prefetch_related(
@@ -187,7 +201,14 @@ class ProductVariantViewSet(RestoreModelMixin, BaseModelViewSet):
     ordering = ['product__name', 'color__name', 'size__order', 'id']
 
     def get_queryset(self):
-        return super().get_queryset().annotate(effective_price=effective_price(prefix='product__'))
+        # Primera imagen del producto en el color de la variante (sin consultas por fila).
+        first_image = ProductImage.objects.filter(product=OuterRef('product'), color=OuterRef('color')).order_by(
+            '-is_primary', 'sort_order', 'id'
+        )
+        return super().get_queryset().annotate(
+            effective_price=effective_price(prefix='product__'),
+            image_key=Subquery(first_image.values('storage_key')[:1]),
+        )
 
     def perform_destroy(self, instance):
         product = instance.product
@@ -198,4 +219,43 @@ class ProductVariantViewSet(RestoreModelMixin, BaseModelViewSet):
                 'No se puede eliminar la última variante de un producto publicado. '
                 'Despublicá el producto primero.'
             )
+        if (
+            product.is_published
+            and product.has_variant_with_image()
+            and not product.has_variant_with_image(without_variant=instance.pk)
+        ):
+            raise ValidationError(
+                'No se puede eliminar la última variante con foto de un producto publicado. '
+                'Despublicá el producto primero.'
+            )
         super().perform_destroy(instance)
+
+
+@PRODUCT_IMAGE_VIEWSET_SCHEMA
+class ProductImageViewSet(BaseModelViewSet):
+    queryset = ProductImage.objects.select_related('color')
+    serializer_class = ProductImageSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    filterset_fields = ['product', 'color', 'is_primary']
+    search_fields = ['alt_text', 'product__name', 'color__name']
+    ordering_fields = ['sort_order', 'is_primary', 'created_at']
+    ordering = ['product_id', 'color_id', '-is_primary', 'sort_order', 'id']
+
+    def perform_destroy(self, instance):
+        """Eliminar una imagen borra también el archivo del proveedor."""
+        product = instance.product
+        if (
+            product.is_published
+            and product.has_variant_with_image()
+            and not product.has_variant_with_image(without_image=instance.pk)
+        ):
+            raise ValidationError(
+                'No se puede eliminar la última foto de un producto publicado: tiene que quedar al menos '
+                'una variante con foto. Despublicá el producto primero.'
+            )
+        try:
+            delete_image(instance, self.request.user)
+        except ImageStorageNotConfigured as exc:
+            raise ImageStorageUnavailable() from exc
+        except ImageStorageError as exc:
+            raise ImageDeleteFailed() from exc

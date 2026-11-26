@@ -9,7 +9,7 @@ from core.models import ACTIVE, BaseModel, unique_when_active
 from products.slugs import generate_unique_slug
 from products.text import STYLE_CAPITALIZE, STYLE_SENTENCE, STYLE_UPPER, STYLE_WORDS, fold_text, normalize_name
 
-__all__ = ['Category', 'Brand', 'ProductModel', 'Color', 'Size', 'Product', 'ProductVariant', 'SkuCounter']
+__all__ = ['Category', 'Brand', 'ProductModel', 'Color', 'Size', 'Product', 'ProductVariant', 'SkuCounter', 'ProductImage']
 
 SKU_PREFIX = 'CHAR'
 class NormalizedNameMixin:
@@ -258,7 +258,11 @@ class Product(SlugFallbackMixin, BaseModel):
     Publicación: `is_published` hace visible el producto en la tienda y sólo
     se puede activar si tiene al menos una variante activa (por eso un
     producto no puede nacer publicado: se crea, se le cargan las variantes y
-    después se publica). Mientras esté publicado no se puede eliminar su
+    sus fotos y después se publica). Además al menos una de sus variantes debe
+    tener una foto (una imagen de su color). Esa exigencia rige al *publicar*
+    (un producto que ya estaba publicado no se revalida al editarlo) y, mientras
+    esté publicado, la API no deja quitarle la última variante con foto
+    (eliminar esa foto o esa variante, o cambiarles el color). Tampoco se puede eliminar su
     última variante activa (lo valida la API).
 
     Precios: `cost_price` (costo, sensible: requiere el permiso
@@ -324,8 +328,28 @@ class Product(SlugFallbackMixin, BaseModel):
     def has_active_variants(self):
         return self.pk is not None and self.variants.filter(is_deleted=False).exists()
 
+    def has_variant_with_image(self, *, without_image=None, without_variant=None, with_color=None):
+        """
+        ¿Alguna variante activa tiene al menos una foto (una imagen activa de su color)?
+        Los argumentos permiten preguntar "¿y si...?" sin tocar nada: `without_image` /
+        `without_variant` (pk) ignoran esa imagen o variante, y `with_color` suma ese color
+        como si una variante lo usara (para cambios de color).
+        """
+        if self.pk is None:
+            return False
+        colors = set(
+            self.variants.filter(is_deleted=False).exclude(pk=without_variant).values_list('color_id', flat=True)
+        )
+        if with_color is not None:
+            colors.add(with_color.pk)
+        return ProductImage.objects.filter(product=self, color_id__in=colors).exclude(pk=without_image).exists()
+
     def get_current_price(self, today=None):
         return self.promo_price if self.is_on_promo(today) else self.sale_price
+
+    def _was_published(self):
+        """¿Ya estaba publicado en la base? (la exigencia de fotos sólo rige al pasar a publicado)"""
+        return self.pk is not None and type(self).all_objects.filter(pk=self.pk, is_published=True).exists()
 
     def clean(self):
         super().clean()
@@ -339,6 +363,8 @@ class Product(SlugFallbackMixin, BaseModel):
                 errors['product_model'] = 'El modelo no pertenece a la marca elegida.'
         if self.is_published and not self.has_active_variants():
             errors['is_published'] = 'Sólo se pueden publicar productos que tengan variantes.'
+        elif self.is_published and not self._was_published() and not self.has_variant_with_image():
+            errors['is_published'] = 'Sólo se pueden publicar productos con al menos una variante que tenga foto.'
         promo = (self.promo_price, self.promo_start, self.promo_end)
         if any(v is not None for v in promo) and not all(v is not None for v in promo):
             errors['promo_price'] = 'La promoción requiere precio, fecha desde y fecha hasta.'
@@ -405,3 +431,38 @@ class ProductVariant(BaseModel):
                 super().save(*args, **kwargs)
             return
         super().save(*args, **kwargs)
+
+
+class ProductImage(BaseModel):
+    """
+    Imagen de un producto en un color. Un producto-color puede tener varias
+    (la galería de ese color en la tienda: la principal primero y después por
+    `sort_order`); como mucho una es la principal (`is_primary`); no depende
+    del talle. El archivo vive en el proveedor de imágenes (`core.media`): acá se
+    guarda sólo su clave (`storage_key`), nunca el archivo. El producto no cambia
+    una vez creada la imagen; el color sí (para corregir un error de carga).
+    """
+
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='images', verbose_name='producto')
+    color = models.ForeignKey(Color, on_delete=models.PROTECT, related_name='images', verbose_name='color')
+    storage_key = models.CharField('clave de almacenamiento', max_length=500)
+    alt_text = models.CharField('texto alternativo', max_length=200, blank=True)
+    sort_order = models.PositiveIntegerField('orden', default=0)
+    is_primary = models.BooleanField('principal', default=False)
+
+    class Meta:
+        verbose_name = 'imagen de producto'
+        verbose_name_plural = 'imágenes de producto'
+        ordering = ['product__name', 'color__name', '-is_primary', 'sort_order', 'id']
+        indexes = [models.Index(fields=['product', 'color'], name='productimage_product_color_idx')]
+        constraints = [
+            # A lo sumo una principal activa por producto-color.
+            models.UniqueConstraint(
+                fields=['product', 'color'],
+                condition=ACTIVE & Q(is_primary=True),
+                name='productimage_one_primary_per_color',
+            ),
+        ]
+
+    def __str__(self):
+        return self.storage_key

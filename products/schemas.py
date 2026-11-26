@@ -18,6 +18,7 @@ __all__ = [
     'SIZE_VIEWSET_SCHEMA',
     'PRODUCT_VIEWSET_SCHEMA',
     'PRODUCT_VARIANT_VIEWSET_SCHEMA',
+    'PRODUCT_IMAGE_VIEWSET_SCHEMA',
 ]
 
 
@@ -30,7 +31,7 @@ _NAME_RULE = (
 )
 
 
-def _catalog_schema(*, tag, singular, plural, model, example, request_example, list_extra='', delete_extra='', create_extra=None, extra_views=None):
+def _catalog_schema(*, tag, singular, plural, model, example, request_example, list_extra='', delete_extra='', create_extra=None, extra_views=None, restorable=True):
     """
     `singular`/`plural` con artículo ("una marca", "las marcas") ya resuelto
     por quien llama, para no adivinar género en español.
@@ -44,7 +45,7 @@ def _catalog_schema(*, tag, singular, plural, model, example, request_example, l
         type=int,
     )
     response_example = OpenApiExample(tag, value=example, response_only=True)
-    return extend_schema_view(
+    views = dict(
         list=extend_schema(
             tags=[tag],
             summary=f'Listar {plural}',
@@ -109,6 +110,9 @@ def _catalog_schema(*, tag, singular, plural, model, example, request_example, l
         ),
         **(extra_views or {}),
     )
+    if not restorable:
+        views.pop('restore')
+    return extend_schema_view(**views)
 
 
 CATEGORY_VIEWSET_SCHEMA = _catalog_schema(
@@ -258,8 +262,9 @@ PRODUCT_VIEWSET_SCHEMA = _catalog_schema(
         'nombre y se numera si ya existe; no cambia solo al renombrar. Al editar, `slug: ""` lo '
         'regenera desde el nombre, pero sólo si el producto no está publicado. '
         '`is_published` indica si el producto es visible en la tienda (por defecto `false`) y sólo se '
-        'puede poner en `true` si el producto tiene al menos una variante activa: por eso se crea '
-        'sin publicar, se le cargan las variantes y después se publica (PATCH). '
+        'puede poner en `true` si el producto tiene al menos una variante activa **con foto** (una imagen activa de '
+        'su color): por eso se crea sin publicar, se le cargan variantes y fotos y después se publica (PATCH). '
+        'La exigencia rige al pasar a publicado: un producto ya publicado se puede seguir editando. '
         'La categoría debe ser una hoja (sin subcategorías). `brand` y `product_model` son '
         'opcionales; si se envía sólo el modelo, la marca se completa con la del modelo, y si se '
         'envían ambos deben coincidir. La promoción exige `promo_price`, `promo_start` y '
@@ -273,7 +278,8 @@ PRODUCT_VIEWSET_SCHEMA = _catalog_schema(
             summary='Obtener un producto con sus variantes',
             description=(
                 'Igual que `GET /api/products/{id}/` pero incluye `variants`: las variantes activas '
-                '(`id`, `sku`, `color` y `talle` completos), ordenadas por color y talle. Requiere '
+                '(`id`, `sku`, `color` y `talle` completos), ordenadas por color y talle, e `images` (las imágenes activas, '
+                'ordenadas por color y `sort_order`; cada una trae `color`, `url` y `thumbnail_url`). Requiere '
                 'permisos `products.view_product` y `products.view_productvariant`. El costo sigue '
                 'las mismas reglas que en el detalle normal.'
             ),
@@ -293,6 +299,8 @@ PRODUCT_VARIANT_VIEWSET_SCHEMA = _catalog_schema(
     model='productvariant',
     example={
         'id': 1, 'sku': 'CHAR-0001', 'created_at': '2026-01-15T12:00:00Z',
+        'image_url': 'https://res.cloudinary.com/demo/image/upload/f_auto,q_auto/char/products/1/abc123',
+        'thumbnail_url': 'https://res.cloudinary.com/demo/image/upload/c_fill,w_400,h_400/f_auto,q_auto/char/products/1/abc123',
         'product': 1, 'product_name': 'Vestido midi', 'is_published': True,
         'category': 5, 'category_label': 'Vestidos › Largos', 'brand': 2, 'brand_name': 'Nike',
         'product_model': None, 'product_model_name': None,
@@ -302,16 +310,61 @@ PRODUCT_VARIANT_VIEWSET_SCHEMA = _catalog_schema(
     },
     request_example={'product': 1, 'color': 1, 'size': 3},
     list_extra=(
-        'Pensado para la grilla: cada fila trae nombres y precios del producto. Filtros: `product`, `color`, '
+        'Pensado para la grilla: cada fila trae nombres y precios del producto y `image_url`/`thumbnail_url` (la imagen principal del producto en el color de la variante o, si no hay, la de menor `sort_order`; `null` si no tiene). Filtros: `product`, `color`, '
         '`size`, `category` (una raíz incluye sus subcategorías), `brand`, `product_model`, `is_published`, '
         '`on_promo`, `min_price` y `max_price` (sobre el precio vigente). `search` busca en SKU, producto, marca, '
         'modelo, color y talle. `ordering`: `sku`, `created_at`, `product__name`, `color__name`, `size__order`, '
         '`effective_price`, `product__sale_price` (prefijo `-` para descendente). '
     ),
-    delete_extra='No se puede eliminar la última variante activa de un producto publicado: despublicalo primero.',
+    delete_extra=(
+        'No se puede eliminar la última variante activa de un producto publicado ni la última variante con foto: '
+        'despublicalo primero. Tampoco se puede cambiar su color si eso deja al producto publicado sin ninguna variante con foto.'
+    ),
     create_extra=(
         'Una variante es la combinación producto + color + talle, única entre las activas. '
         'El `sku` (`CHAR-0001`, `CHAR-0002`…) lo asigna el sistema, es de sólo lectura y nunca se '
         'reutiliza. El producto no se puede cambiar una vez creada la variante.'
+    ),
+)
+
+PRODUCT_IMAGE_VIEWSET_SCHEMA = _catalog_schema(
+    tag='Product images',
+    singular='una imagen de producto',
+    plural='las imágenes de producto',
+    model='productimage',
+    restorable=False,
+    example={
+        'id': 1, 'product': 1, 'color': 2, 'color_name': 'Azul', 'color_hex': '#14284B',
+        'storage_key': 'char/products/1/abc123',
+        'url': 'https://res.cloudinary.com/demo/image/upload/f_auto,q_auto/char/products/1/abc123',
+        'thumbnail_url': 'https://res.cloudinary.com/demo/image/upload/c_fill,w_400,h_400/f_auto,q_auto/char/products/1/abc123',
+        'alt_text': 'Vestido midi azul, frente', 'sort_order': 0, 'is_primary': True,
+        'created_at': '2026-01-15T12:00:00Z', 'updated_at': '2026-01-15T12:00:00Z',
+        'created_by': 1, 'updated_by': None,
+    },
+    request_example={'product': 1, 'color': 2, 'alt_text': 'Vestido midi azul, frente', 'is_primary': True},
+    list_extra=(
+        'Filtros: `product`, `color` (la galería de un producto-color) e `is_primary`. Orden por defecto: producto, '
+        'color, la principal primero y después `sort_order`. '
+    ),
+    delete_extra=(
+        'Borra también el archivo del proveedor de imágenes y no se puede deshacer; si el proveedor falla '
+        'responde 502 y la imagen NO se elimina (503 si el almacenamiento no está configurado). Si el producto está '
+        'publicado, no se puede eliminar (ni mover a otro color) la última foto que lo mantiene con una variante con foto: '
+        'responde 400 y hay que despublicarlo primero.'
+    ),
+    create_extra=(
+        'Se sube con `multipart/form-data`: campo `file` (JPEG, PNG o WEBP, máx. 5 MB) más `product`, `color`, '
+        '`alt_text`, `sort_order` e `is_primary`. Un producto-color admite varias imágenes (se sube una por request); si no se '
+        'envía `sort_order` queda al final de la galería de ese producto-color. El backend valida el archivo por su '
+        'contenido, lo sube al proveedor y guarda su clave en `storage_key` (de sólo lectura). `url` y '
+        '`thumbnail_url` son las direcciones públicas. El archivo y el producto no se pueden cambiar después: se '
+        'elimina la imagen y se sube otra; sí se pueden editar `color`, `alt_text`, `sort_order` e `is_primary`. '
+        '`is_primary` marca la imagen principal de ese producto-color (la que muestran la grilla y la tienda): '
+        'hay una sola, así que al marcar una se desmarca la anterior; la primera que se sube no queda principal '
+        'sola, y si se elimina la principal no se promueve otra (mientras no haya principal se usa la de menor '
+        '`sort_order`). '
+        'Responde 400 si el archivo no es válido, 503 si el almacenamiento no está configurado y 502 si el '
+        'proveedor falla. Un color o un producto con imágenes activas no se pueden eliminar.'
     ),
 )

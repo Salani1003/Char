@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from products.models import Brand, Category, Color, Product, ProductVariant, Size
+from products.models import Brand, Category, Color, Product, ProductImage, ProductVariant, Size
 from products.slugs import generate_unique_slug
 from users.models import User
 
@@ -55,6 +55,8 @@ class SlugApiTests(TestCase):
     def add_variant(self, product_id):
         color, _ = Color.objects.get_or_create(name='Azul')
         size, _ = Size.objects.get_or_create(name='M')
+        # Con foto de su color: es lo que exige publicar.
+        ProductImage.objects.get_or_create(product_id=product_id, color=color, storage_key='test/foto')
         return ProductVariant.objects.create(product_id=product_id, color=color, size=size)
 
     def published_product(self, **kw):

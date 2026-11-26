@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from core.models import ACTIVE, BaseModel, unique_when_active
 from products.slugs import generate_unique_slug
-from products.text import STYLE_SENTENCE, STYLE_UPPER, STYLE_WORDS, fold_text, normalize_name
+from products.text import STYLE_CAPITALIZE, STYLE_SENTENCE, STYLE_UPPER, STYLE_WORDS, fold_text, normalize_name
 
 __all__ = ['Category', 'Brand', 'ProductModel', 'Color', 'Size', 'Product', 'ProductVariant', 'SkuCounter']
 
@@ -193,6 +193,7 @@ class ProductModel(NormalizedNameMixin, BaseModel):
 
 class Color(NormalizedNameMixin, BaseModel):
     DUPLICATE_LABEL = 'el color'
+    NAME_STYLE = STYLE_CAPITALIZE
 
     name = models.CharField(max_length=50)
     hex = models.CharField(

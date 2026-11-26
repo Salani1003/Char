@@ -4,11 +4,12 @@ categoría, color), para que "Nike", "nike" y "NIKE" sean la misma marca.
 """
 import unicodedata
 
-__all__ = ['fold_text', 'normalize_name', 'STYLE_WORDS', 'STYLE_SENTENCE', 'STYLE_UPPER']
+__all__ = ['fold_text', 'normalize_name', 'STYLE_WORDS', 'STYLE_SENTENCE', 'STYLE_UPPER', 'STYLE_CAPITALIZE']
 
 STYLE_WORDS = 'words'
 STYLE_SENTENCE = 'sentence'
 STYLE_UPPER = 'upper'
+STYLE_CAPITALIZE = 'capitalize'
 
 
 def fold_text(text: str) -> str:
@@ -28,6 +29,10 @@ def normalize_name(name: str, style: str = STYLE_SENTENCE) -> str:
     mayúsculas siempre. No usa `str.title()`, que rompe apóstrofes.
     """
     words = name.split()
+    if style == STYLE_CAPITALIZE:
+        # Siempre: "ROJO" / "rojo" -> "Rojo"; "AZUL MARINO" -> "Azul marino".
+        joined = ' '.join(words).lower()
+        return joined[:1].upper() + joined[1:]
     if style == STYLE_UPPER:
         return ' '.join(words).upper()
     if name == name.lower():

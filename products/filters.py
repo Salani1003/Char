@@ -1,11 +1,13 @@
 import django_filters
 
-from django.db.models import Case, DecimalField, Exists, F, OuterRef, Q, When
+from django.db.models import Case, DecimalField, Exists, F, OuterRef, Q, Subquery, When
 from django.utils import timezone
 
-from products.models import Category, Product, ProductModel, ProductVariant
+from products.models import Category, Product, ProductImage, ProductModel, ProductVariant
 
-__all__ = ['CategoryFilter', 'ProductModelFilter', 'ProductFilter', 'ProductVariantFilter', 'effective_price']
+__all__ = [
+    'CategoryFilter', 'ProductModelFilter', 'ProductFilter', 'ProductVariantFilter', 'effective_price', 'variant_image_key',
+]
 
 
 def effective_price(today=None, prefix=''):
@@ -22,6 +24,19 @@ def effective_price(today=None, prefix=''):
         default=F(f'{prefix}sale_price'),
         output_field=DecimalField(max_digits=12, decimal_places=2),
     )
+
+
+def variant_image_key():
+    """
+    Subconsulta con la `storage_key` de la foto de una variante (sin consultas por fila): la principal del
+    producto en el color de la variante o, si no hay principal, la de menor `sort_order`; `NULL` si el color
+    no tiene fotos. Se anota sobre un queryset de `ProductVariant` (`.annotate(image_key=variant_image_key())`)
+    y es el criterio único de `product-variants` y `stock`.
+    """
+    first = ProductImage.objects.filter(product=OuterRef('product'), color=OuterRef('color')).order_by(
+        '-is_primary', 'sort_order', 'id'
+    )
+    return Subquery(first.values('storage_key')[:1])
 
 
 class CategoryFilter(django_filters.FilterSet):

@@ -74,6 +74,11 @@ ROLES: dict[str, list[str]] = {
         "products.view_productimage",
         "products.change_productimage",
         "products.delete_productimage",
+        "stock.view_stocklevel",
+        "stock.view_stockmovement",
+        "stock.add_stockmovement",
+        "stock.view_stockcount",
+        "stock.add_stockcount",
     ],
     "Vendedor": [
         "clients.add_client",
@@ -87,5 +92,8 @@ ROLES: dict[str, list[str]] = {
         "products.view_product",
         "products.view_productvariant",
         "products.view_productimage",
+        "stock.view_stocklevel",
+        "stock.view_stockmovement",
+        "stock.view_stockcount",
     ],
 }

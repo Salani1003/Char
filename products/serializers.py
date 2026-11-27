@@ -375,7 +375,8 @@ class ProductSerializer(AutoSlugMixin, BaseModelSerializer):
 
 class ProductVariantSerializer(BaseModelSerializer):
     """
-    Se escribe con `product`, `color` y `size` (ids). Los demás campos son de
+    Se escribe con `product`, `color`, `size` (ids) y `min_stock` (umbral de reposición,
+    editable también después de crearla). Los demás campos son de
     sólo lectura y evitan consultar otros endpoints para armar la grilla:
     nombres de producto/color/talle, categoría, marca, modelo y precios del
     producto (el costo no se expone acá).
@@ -407,10 +408,27 @@ class ProductVariantSerializer(BaseModelSerializer):
             'id', 'sku', 'created_at', 'image_url', 'thumbnail_url',
             'product', 'product_name', 'is_published',
             'category', 'category_label', 'brand', 'brand_name', 'product_model', 'product_model_name',
-            'color', 'color_name', 'color_hex', 'size', 'size_name',
+            'color', 'color_name', 'color_hex', 'size', 'size_name', 'min_stock',
             'sale_price', 'promo_price', 'promo_start', 'promo_end', 'current_price', 'is_on_promo',
         ]
         read_only_fields = ['id', 'sku', 'created_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Sin `stock.view_stocklevel` no se ven los saldos: los campos se omiten.
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is not None and user.has_perm('stock.view_stocklevel'):
+            quantity = getattr(instance, 'quantity', None)  # lo anota el viewset; fuera del listado se consulta
+            if quantity is None:
+                level = getattr(instance, 'stock_level', None)
+                quantity = level.quantity if level else 0
+            low = getattr(instance, 'is_low_stock', None)
+            if low is None:
+                low = instance.min_stock > 0 and quantity <= instance.min_stock
+            data['quantity'] = quantity
+            data['is_low_stock'] = low
+        return data
 
     def get_current_price(self, obj) -> str:
         return str(obj.product.get_current_price())

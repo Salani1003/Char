@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'users',
     'clients',
     'products',
+    'stock',
 ]
 
 MIDDLEWARE = [
@@ -221,6 +222,11 @@ SPECTACULAR_SETTINGS = {
         if DEBUG
         else ['rest_framework.permissions.IsAdminUser']
     ),
+    # `kind` aparece con dos conjuntos de opciones (todos los tipos / sólo ingreso y egreso del alta).
+    'ENUM_NAME_OVERRIDES': {
+        'StockKindEnum': 'stock.models.StockMovement.KIND_CHOICES',
+        'StockBatchKindEnum': [('ingreso', 'Ingreso'), ('egreso', 'Egreso')],
+    },
 }
 
 # Hardening de producción

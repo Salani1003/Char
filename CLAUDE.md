@@ -52,7 +52,7 @@ No linter/formatter is configured in this repo currently.
   can delete or deactivate their own user. `User` is not a `BaseModel`:
   `DELETE` just sets `is_active=False`.
 
-- `products/` — catálogos, producto y variantes (stock pendiente): `Category` (a lo sumo 2 niveles, `parent` opcional; el producto irá
+- `products/` — catálogos, producto y variantes : `Category` (a lo sumo 2 niveles, `parent` opcional; el producto irá
   a una hoja y filtrar por una raíz incluye sus hijas), `Brand`, `ProductModel`
   (modelo de una marca), `Color` y `Size` (con `order`). Todos son `BaseModel`
   con nombre único case-insensitive entre activos (`Lower('name')`, validado en
@@ -68,7 +68,7 @@ No linter/formatter is configured in this repo currently.
   `ProductVariant` (`product-variants`): producto + color + talle (único entre
   activas) + `sku` asignado por el sistema (`CHAR-0001`…, contador `SkuCounter` bajo
   `select_for_update`, de sólo lectura, nunca se reutiliza);
-  el producto no cambia tras crearla; el stock se agregará a esta entidad.
+  el producto no cambia tras crearla; el saldo vive en `stock.StockLevel`; acá sólo `min_stock` (umbral de reposición, default 0 = sin alerta; entero ≥ 0, se edita por `PATCH` con `change_productvariant`, sin permiso aparte).
   Nombres de catálogos (`Brand`, `ProductModel`, `Category`, `Color`) sin repetidos:
   `NormalizedNameMixin` los normaliza al guardar (`products/text.py`: espacios colapsados;
   todo en minúsculas → capitalizado, por palabra en marcas y sólo la inicial en el resto;
@@ -105,6 +105,7 @@ No linter/formatter is configured in this repo currently.
   `max_price`; `search`; `ordering` por `sku`, `created_at`, `product__name`, `color__name`,
   `size__order`, `effective_price`, `product__sale_price`. Al escribir sólo se usan
   `product`, `color` y `size`. `effective_price()` (en `products/filters.py`) es el precio vigente en SQL.
+  `GET product-variants/` trae además `quantity` e `is_low_stock` (mismos nombres y criterio que `stock/`; anotados con `stock.annotations.with_stock`, sin consultas por fila), sólo con `stock.view_stocklevel` (sin él los campos se omiten); `ordering=quantity`.
   `GET products/` trae `variants_count` (activas; para todo el que ve productos) y, sólo en el listado y con
   `products.view_productvariant`, `variants` (`{id, sku, color{id,name,hex}, size{id,name,order}}` por color y talle);
   filtro `?has_variants=true|false` y `ordering=variants_count`.
@@ -112,6 +113,38 @@ No linter/formatter is configured in this repo currently.
   anidados; exige `view_product` y `view_productvariant`); `GET products/{id}/` no las incluye.
   No se borra categoría/marca/modelo con productos activos, ni producto/color/talle
   con variantes activas.
+
+- `stock/` — stock de un único local (sin modelo de ubicación). Nunca hay stock negativo (`CheckConstraint`
+  + `InsufficientStock` → 400 con `detail`, `variant`, `available`, `requested`; los números viajan como texto).
+  Los **movimientos son la fuente de verdad** (`StockMovement`: inmutable, sin soft delete, con `quantity` con signo,
+  `stock_before`/`stock_after`, `kind` ingreso/egreso/ajuste y `reason`) y cada uno es una **línea de una
+  `StockOperation`**, el "documento" que los agrupa: un ingreso/egreso en lote, la confirmación de un recuento
+  (aunque no tenga diferencias: queda una operación sin líneas) y cada anulación son una operación. El historial
+  principal es `stock-operations/` (una fila por operación con `lines_count` y `units`; el detalle trae `movements`);
+  `stock-movements/` son las líneas sueltas (útil para el historial de una variante con `?variant=`). Toda operación se
+  crea desde los servicios, nunca a mano: `apply_movement` sin `operation` crea una de una sola línea.
+  `StockLevel` es el saldo por variante y **sólo se
+  toca desde `stock/services.py`**: `apply_movement` (bloquea el saldo con `select_for_update`, se une a la transacción
+  abierta), `apply_movements` (lote atómico → devuelve la operación; orden por id de variante), `reverse_movement`,
+  `adjust_to_count`, `confirm_count`/`cancel_count`. Nunca modifiques `StockLevel` ni crees `StockMovement` a mano. Un
+  error se corrige con `POST stock-movements/{id}/reverse/` (motivo `anulacion`; una sola vez; no se anulan anulaciones
+  ni ajustes; anula una línea, no la operación entera). Motivos:
+  ingreso `compra`/`cambio_entrada`/`stock_inicial`/`otro`; egreso `rotura_merma`/`perdida`/`uso_interno`/
+  `devolucion_proveedor`/`cambio_salida`/`otro`; ajuste `recuento`/`correccion`. El stock inicial se carga con un ingreso en
+  lote `stock_inicial`. No hay devoluciones de cliente; los cambios (`cambio_entrada`/`cambio_salida`) se registran como
+  ingreso + egreso hasta que exista el módulo de ventas (que los hará atómicos con `apply_movement` y sumará un FK al documento).
+  No se mueve stock de una variante eliminada y no se elimina una variante con stock > 0
+  (`ProductVariantViewSet.perform_destroy`; sólo en la API, no en el admin).
+  Endpoints: `stock/` (grilla de variantes activas con `quantity`, `min_stock`, `is_low_stock` = `min_stock > 0` y
+  `quantity <= min_stock`, y `image_url`/`thumbnail_url` con el mismo criterio que `product-variants` vía `products.filters.variant_image_key`, sólo con `products.view_productimage`, si no `null`; filtros `in_stock`, `out_of_stock`, `low_stock`, `category`…), `stock/summary/`, `stock-movements/`
+  (líneas: listar/ver/anular), `stock-operations/` (historial agrupado; `POST` registra el ingreso/egreso en lote), `stock-counts/`. Nada se edita ni se borra.
+  Recuentos (`StockCount`, `BaseModel`): borrador → `confirm` o `cancel`; parcial (sólo se ajustan las variantes cargadas);
+  `POST items/` hace upsert de una línea, `POST items/bulk/` de muchas a la vez (atómico; las no mencionadas quedan) y `DELETE items/{variant_id}/` quita una; al confirmar se calcula la diferencia con
+  el saldo bloqueado (`system_quantity`, `difference`) y se crea un ajuste `recuento` sólo si hubo diferencia. Confirmado o
+  cancelado queda congelado; no se borra. Permisos (`stock/permissions.py::ActionPermission`, por acción, no un CRUD de
+  modelo): `view_stocklevel`, `view_stockmovement`, `add_stockmovement` (ingresar, egresar, anular), `view_stockcount`,
+  `add_stockcount` (armar, confirmar y cancelar: no hay aprobación en dos pasos). Administrador todo; Vendedor sólo ver.
+  El admin es de sólo consulta.
 
 - `core/media.py` — adaptador de almacenamiento de imágenes: `ImageStorage`
   (`upload`/`delete`/`url`) + `CloudinaryImageStorage`, elegido con `settings.IMAGE_STORAGE`

@@ -304,20 +304,20 @@ PRODUCT_VARIANT_VIEWSET_SCHEMA = _catalog_schema(
         'product': 1, 'product_name': 'Vestido midi', 'is_published': True,
         'category': 5, 'category_label': 'Vestidos › Largos', 'brand': 2, 'brand_name': 'Nike',
         'product_model': None, 'product_model_name': None,
-        'color': 1, 'color_name': 'Azul', 'color_hex': '#14284B', 'size': 3, 'size_name': 'M',
+        'color': 1, 'color_name': 'Azul', 'color_hex': '#14284B', 'size': 3, 'size_name': 'M', 'min_stock': 3,
         'sale_price': '200.00', 'promo_price': '150.00', 'promo_start': '2026-11-01', 'promo_end': '2026-11-30',
         'current_price': '150.00', 'is_on_promo': True,
     },
-    request_example={'product': 1, 'color': 1, 'size': 3},
+    request_example={'product': 1, 'color': 1, 'size': 3, 'min_stock': 3},
     list_extra=(
-        'Pensado para la grilla: cada fila trae nombres y precios del producto y `image_url`/`thumbnail_url` (la imagen principal del producto en el color de la variante o, si no hay, la de menor `sort_order`; `null` si no tiene). Filtros: `product`, `color`, '
+        '`min_stock` es el umbral de reposición de la variante (default 0 = sin alerta; se puede cambiar con PATCH). Pensado para la grilla: cada fila trae nombres y precios del producto y `image_url`/`thumbnail_url` (la imagen principal del producto en el color de la variante o, si no hay, la de menor `sort_order`; `null` si no tiene). Filtros: `product`, `color`, '
         '`size`, `category` (una raíz incluye sus subcategorías), `brand`, `product_model`, `is_published`, '
         '`on_promo`, `min_price` y `max_price` (sobre el precio vigente). `search` busca en SKU, producto, marca, '
         'modelo, color y talle. `ordering`: `sku`, `created_at`, `product__name`, `color__name`, `size__order`, '
         '`effective_price`, `product__sale_price` (prefijo `-` para descendente). '
     ),
     delete_extra=(
-        'No se puede eliminar la última variante activa de un producto publicado ni la última variante con foto: '
+        'No se puede eliminar una variante con stock (> 0). No se puede eliminar la última variante activa de un producto publicado ni la última variante con foto: '
         'despublicalo primero. Tampoco se puede cambiar su color si eso deja al producto publicado sin ninguna variante con foto.'
     ),
     create_extra=(

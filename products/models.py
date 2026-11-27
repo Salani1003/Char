@@ -399,8 +399,8 @@ class SkuCounter(models.Model):
 class ProductVariant(BaseModel):
     """
     Combinación concreta de un producto: color + talle. Es única por
-    (producto, color, talle) entre las activas. El stock se agrega más
-    adelante, sobre esta misma entidad.
+    (producto, color, talle) entre las activas. El saldo vive en
+    `stock.StockLevel`; acá sólo el umbral `min_stock`.
 
     El `sku` lo asigna el sistema al crearla (`CHAR-0001`, `CHAR-0002`…),
     nunca se reutiliza y no se puede modificar.
@@ -410,6 +410,10 @@ class ProductVariant(BaseModel):
     color = models.ForeignKey(Color, on_delete=models.PROTECT, related_name='variants')
     size = models.ForeignKey(Size, on_delete=models.PROTECT, related_name='variants')
     sku = models.CharField(max_length=64, editable=False, blank=True)
+    min_stock = models.PositiveIntegerField(
+        'stock mínimo', default=0,
+        help_text='Umbral de reposición: con stock <= este valor (y > 0) la variante cuenta como stock bajo. 0 = sin alerta.',
+    )
 
     class Meta:
         verbose_name = 'variante'

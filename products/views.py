@@ -1,4 +1,4 @@
-from django.db.models import Case, Count, DecimalField, Exists, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Value, When
+from django.db.models import Case, Count, DecimalField, Exists, F, IntegerField, OuterRef, Prefetch, Q, Value, When
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
 from rest_framework.decorators import action
@@ -9,8 +9,16 @@ from rest_framework.response import Response
 from core.exceptions import ImageDeleteFailed, ImageStorageUnavailable
 from core.media import ImageStorageError, ImageStorageNotConfigured
 from core.viewsets import BaseModelViewSet, RestoreModelMixin
-from products.filters import effective_price, CategoryFilter, ProductFilter, ProductModelFilter, ProductVariantFilter
+from products.filters import (
+    CategoryFilter,
+    ProductFilter,
+    ProductModelFilter,
+    ProductVariantFilter,
+    effective_price,
+    variant_image_key,
+)
 from products.models import Brand, Category, Color, Product, ProductImage, ProductModel, ProductVariant, Size
+from stock.annotations import with_stock
 from products.services import delete_image
 from products.schemas import (
     BRAND_VIEWSET_SCHEMA,
@@ -197,20 +205,23 @@ class ProductVariantViewSet(RestoreModelMixin, BaseModelViewSet):
     search_fields = ['sku', 'product__name', 'product__brand__name', 'product__product_model__name', 'color__name', 'size__name']
     ordering_fields = [
         'sku', 'created_at', 'product__name', 'color__name', 'size__order', 'effective_price', 'product__sale_price',
+        'quantity',
     ]
     ordering = ['product__name', 'color__name', 'size__order', 'id']
 
     def get_queryset(self):
-        # Primera imagen del producto en el color de la variante (sin consultas por fila).
-        first_image = ProductImage.objects.filter(product=OuterRef('product'), color=OuterRef('color')).order_by(
-            '-is_primary', 'sort_order', 'id'
-        )
-        return super().get_queryset().annotate(
+        return with_stock(super().get_queryset()).annotate(
             effective_price=effective_price(prefix='product__'),
-            image_key=Subquery(first_image.values('storage_key')[:1]),
+            image_key=variant_image_key(),  # primera foto del producto en el color de la variante
         )
 
     def perform_destroy(self, instance):
+        level = getattr(instance, 'stock_level', None)  # OneToOne inverso de `stock`: None si nunca tuvo movimientos
+        if level is not None and level.quantity > 0:
+            raise ValidationError(
+                f'No se puede eliminar una variante con stock ({level.quantity} unidades). '
+                'Registrá un egreso o un recuento que lo deje en 0 primero.'
+            )
         product = instance.product
         if product.is_published and not (
             product.variants.filter(is_deleted=False).exclude(pk=instance.pk).exists()

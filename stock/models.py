@@ -48,6 +48,15 @@ class StockOperation(models.Model):
         'stock.StockCount', null=True, blank=True, on_delete=models.PROTECT,
         related_name='operation', verbose_name='recuento',
     )
+    # Documento de ventas que la originó (la venta, el cambio o sus anulaciones). Se anula desde ahí.
+    sale = models.ForeignKey(
+        'sales.Sale', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='stock_operations', verbose_name='venta',
+    )
+    exchange = models.ForeignKey(
+        'sales.Exchange', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='stock_operations', verbose_name='cambio',
+    )
     created_at = models.DateTimeField('fecha', auto_now_add=True, db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
@@ -85,6 +94,7 @@ class StockMovement(models.Model):
     USO_INTERNO = 'uso_interno'
     DEVOLUCION_PROVEEDOR = 'devolucion_proveedor'
     CAMBIO_SALIDA = 'cambio_salida'
+    VENTA = 'venta'  # lo genera el módulo de ventas
     # Motivos de ajuste
     RECUENTO = 'recuento'
     CORRECCION = 'correccion'
@@ -102,6 +112,7 @@ class StockMovement(models.Model):
         (USO_INTERNO, 'Uso interno'),
         (DEVOLUCION_PROVEEDOR, 'Devolución a proveedor'),
         (CAMBIO_SALIDA, 'Cambio (sale prenda nueva)'),
+        (VENTA, 'Venta'),
         (RECUENTO, 'Recuento'),
         (CORRECCION, 'Corrección'),
         (OTRO, 'Otro'),
@@ -110,7 +121,7 @@ class StockMovement(models.Model):
     # Motivos válidos por tipo (los valida el servicio/serializer).
     REASONS_BY_KIND = {
         INGRESO: {COMPRA, CAMBIO_ENTRADA, STOCK_INICIAL, OTRO, ANULACION},
-        EGRESO: {ROTURA_MERMA, PERDIDA, USO_INTERNO, DEVOLUCION_PROVEEDOR, CAMBIO_SALIDA, OTRO, ANULACION},
+        EGRESO: {ROTURA_MERMA, PERDIDA, USO_INTERNO, DEVOLUCION_PROVEEDOR, CAMBIO_SALIDA, VENTA, OTRO, ANULACION},
         AJUSTE: {RECUENTO, CORRECCION},
     }
 

@@ -9,11 +9,11 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
 
 from core.pagination import DefaultPagination
+from core.permissions import ActionPermission
 from products.filters import variant_image_key
 from products.models import ProductVariant
 from stock.filters import StockCountFilter, StockFilter, StockMovementFilter, StockOperationFilter
 from stock.models import StockCount, StockCountItem, StockMovement, StockOperation
-from stock.permissions import ActionPermission
 from stock.schemas import (
     STOCK_COUNT_VIEWSET_SCHEMA,
     STOCK_MOVEMENT_VIEWSET_SCHEMA,

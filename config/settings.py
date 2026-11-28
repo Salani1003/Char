@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'clients',
     'products',
     'stock',
+    'sales',
 ]
 
 MIDDLEWARE = [
@@ -132,7 +133,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = env('LANGUAGE_CODE', default='es')
 
-TIME_ZONE = env('TIME_ZONE', default='UTC')
+TIME_ZONE = env('TIME_ZONE', default='America/Argentina/Buenos_Aires')
 
 USE_I18N = True
 
@@ -226,6 +227,9 @@ SPECTACULAR_SETTINGS = {
     'ENUM_NAME_OVERRIDES': {
         'StockKindEnum': 'stock.models.StockMovement.KIND_CHOICES',
         'StockBatchKindEnum': [('ingreso', 'Ingreso'), ('egreso', 'Egreso')],
+        # `status` de recuentos (borrador/confirmado/cancelado) y de ventas y cambios (completada/anulada).
+        'StockCountStatusEnum': 'stock.models.StockCount.STATUS_CHOICES',
+        'SaleStatusEnum': 'sales.models.Sale.Status',
     },
 }
 
@@ -263,3 +267,9 @@ CLOUDINARY_API_SECRET = env('CLOUDINARY_API_SECRET', default='')
 # Carpeta raíz en Cloudinary: permite separar dev/staging/prod en una misma cuenta.
 IMAGE_FOLDER = env('IMAGE_FOLDER', default='char')
 IMAGE_MAX_BYTES = env.int('IMAGE_MAX_BYTES', default=5 * 1024 * 1024)
+
+# Ventas
+# Plazo (días corridos desde la venta) para pedir un cambio.
+EXCHANGE_WINDOW_DAYS = env.int('EXCHANGE_WINDOW_DAYS', default=30)
+# Porcentajes de descuento que se pueden aplicar a una venta (0 = sin descuento).
+SALE_DISCOUNT_CHOICES = (0, 5, 10)

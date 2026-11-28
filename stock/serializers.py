@@ -109,7 +109,7 @@ class StockOperationSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockOperation
         fields = [
-            'id', 'kind', 'kind_display', 'reason', 'reason_display', 'note', 'stock_count',
+            'id', 'kind', 'kind_display', 'reason', 'reason_display', 'note', 'stock_count', 'sale', 'exchange',
             'lines_count', 'units', 'created_at', 'created_by', 'created_by_email',
         ]
         read_only_fields = fields
@@ -142,7 +142,8 @@ class StockMovementCreateSerializer(serializers.Serializer):
     items = _LineSerializer(many=True, allow_empty=False)
 
     def validate(self, attrs):
-        allowed = StockMovement.REASONS_BY_KIND[attrs['kind']] - {StockMovement.ANULACION}
+        # `anulacion` y `venta` los genera el sistema (anulaciones y módulo de ventas), no se cargan a mano.
+        allowed = StockMovement.REASONS_BY_KIND[attrs['kind']] - {StockMovement.ANULACION, StockMovement.VENTA}
         if attrs['reason'] not in allowed:
             raise serializers.ValidationError({'reason': f'El motivo no corresponde a un {attrs["kind"]}.'})
         variants = [item['variant'].pk for item in attrs['items']]

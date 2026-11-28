@@ -108,6 +108,7 @@ class MovementApiTests(StockApiBase):
             {'kind': 'ajuste', 'reason': 'recuento', 'items': [{'variant': self.a.pk, 'quantity': 1}]},
             {'kind': 'ingreso', 'reason': 'perdida', 'items': [{'variant': self.a.pk, 'quantity': 1}]},
             {'kind': 'ingreso', 'reason': 'anulacion', 'items': [{'variant': self.a.pk, 'quantity': 1}]},
+            {'kind': 'egreso', 'reason': 'venta', 'items': [{'variant': self.a.pk, 'quantity': 1}]},  # lo genera ventas
             {'kind': 'ingreso', 'reason': 'compra', 'items': []},
             {'kind': 'ingreso', 'reason': 'compra', 'items': [{'variant': self.a.pk, 'quantity': 0}]},
             {'kind': 'ingreso', 'reason': 'compra', 'items': [{'variant': self.a.pk, 'quantity': 1}] * 2},
@@ -131,6 +132,19 @@ class MovementApiTests(StockApiBase):
         self.assertEqual(len(self.api.get('/api/stock-movements/?reason=compra').data['results']), 2)
         self.assertEqual(len(self.api.get(f'/api/stock-movements/?product={self.product.pk}').data['results']), 3)
         self.assertEqual(len(self.api.get('/api/stock-movements/?date_from=2999-01-01').data['results']), 0)
+
+    def test_date_filters_use_local_time(self):
+        """Un movimiento de las 22:30 en Buenos Aires (01:30 UTC del día siguiente) cuenta en el día local."""
+        from datetime import datetime, timezone as dt_timezone
+
+        m = apply_movement(self.a, I, 5, StockMovement.COMPRA)
+        StockMovement.objects.filter(pk=m.pk).update(created_at=datetime(2026, 3, 10, 1, 30, tzinfo=dt_timezone.utc))
+
+        def count(query):
+            return len(self.api.get(f'/api/stock-movements/?{query}').data['results'])
+
+        self.assertEqual(count('date_from=2026-03-09&date_to=2026-03-09'), 1)
+        self.assertEqual(count('date_from=2026-03-10'), 0)
 
     def test_history_is_immutable(self):
         m = apply_movement(self.a, I, 5, StockMovement.COMPRA)

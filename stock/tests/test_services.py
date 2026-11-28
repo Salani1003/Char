@@ -6,7 +6,7 @@ from django.test import TestCase, TransactionTestCase
 from products.tests.test_variants import VariantFixtureMixin
 from stock.exceptions import InsufficientStock, StockError
 from stock.models import StockLevel, StockMovement, StockOperation
-from stock.services import apply_movement, apply_movements
+from stock.services import apply_movement, apply_movements, reverse_movement, reverse_operation
 from users.models import User
 
 I, E, A = StockMovement.INGRESO, StockMovement.EGRESO, StockMovement.AJUSTE
@@ -126,6 +126,60 @@ class ApplyMovementsBatchTests(VariantFixtureMixin, TestCase):
     def test_batch_rejects_ajuste(self):
         with self.assertRaises(StockError):
             apply_movements([(self.a, 1)], A, StockMovement.RECUENTO)
+
+
+class ReverseOperationTests(VariantFixtureMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.a = self.make()
+        self.b = self.make(color=self.red)
+        self.user = User.objects.create_user(email='a@test.com', password='x')
+        apply_movements([(self.a, 10), (self.b, 10)], I, StockMovement.COMPRA)
+
+    def test_reverses_every_line_in_one_operation(self):
+        sale = apply_movements([(self.a, 3), (self.b, 2)], E, StockMovement.VENTA)
+        reversal = reverse_operation(sale, user=self.user, note='error de carga')
+        self.assertEqual((qty(self.a), qty(self.b)), (10, 10))
+        self.assertEqual((reversal.kind, reversal.reason, reversal.note, reversal.created_by), ('ingreso', 'anulacion', 'error de carga', self.user))
+        lines = list(reversal.movements.order_by('variant_id'))
+        self.assertEqual([(m.quantity, m.reverses.operation_id) for m in lines], [(3, sale.pk), (2, sale.pk)])
+        self.assertEqual(StockOperation.objects.count(), 3)  # compra + venta + una sola anulación
+
+    def test_reversing_an_ingreso_is_an_egreso(self):
+        buy = apply_movements([(self.a, 4)], I, StockMovement.COMPRA)
+        self.assertEqual(reverse_operation(buy).kind, 'egreso')
+        self.assertEqual(qty(self.a), 10)
+
+    def test_second_reversal_rejected(self):
+        sale = apply_movements([(self.a, 1)], E, StockMovement.VENTA)
+        reverse_operation(sale)
+        with self.assertRaises(StockError):
+            reverse_operation(sale)
+        self.assertEqual(qty(self.a), 10)
+
+    def test_partially_reversed_operation_rejected(self):
+        sale = apply_movements([(self.a, 1), (self.b, 1)], E, StockMovement.VENTA)
+        reverse_movement(sale.movements.get(variant=self.a))
+        with self.assertRaises(StockError):
+            reverse_operation(sale)
+        self.assertEqual((qty(self.a), qty(self.b)), (10, 9))
+
+    def test_is_atomic_when_a_line_cannot_be_undone(self):
+        buy = apply_movements([(self.a, 5), (self.b, 5)], I, StockMovement.COMPRA)
+        apply_movement(self.b, E, -12, StockMovement.PERDIDA)  # b queda en 3: no alcanza para deshacer +5
+        with self.assertRaises(InsufficientStock):
+            reverse_operation(buy)
+        self.assertEqual((qty(self.a), qty(self.b)), (15, 3))
+        self.assertFalse(StockMovement.objects.filter(reason='anulacion').exists())
+
+    def test_adjustments_reversals_and_empty_operations_rejected(self):
+        adjust = StockOperation.objects.create(kind=A, reason=StockMovement.RECUENTO)
+        apply_movement(self.a, A, 2, StockMovement.RECUENTO, operation=adjust)
+        reversal = reverse_operation(apply_movements([(self.a, 1)], E, StockMovement.VENTA))
+        empty = StockOperation.objects.create(kind=A, reason=StockMovement.RECUENTO)
+        for op in (adjust, reversal, empty):
+            with self.subTest(op=op.pk), self.assertRaises(StockError):
+                reverse_operation(op)
 
 
 class ConcurrencyTests(VariantFixtureMixin, TransactionTestCase):

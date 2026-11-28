@@ -71,7 +71,7 @@ class StockOperationFilter(django_filters.FilterSet):
 
     class Meta:
         model = StockOperation
-        fields = ['kind', 'reason', 'created_by', 'stock_count', 'variant', 'product', 'search', 'date_from', 'date_to']
+        fields = ['kind', 'reason', 'created_by', 'stock_count', 'sale', 'exchange', 'variant', 'product', 'search', 'date_from', 'date_to']
 
     @staticmethod
     def _has_line(**lookups):

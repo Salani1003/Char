@@ -6,7 +6,7 @@ from stock.exceptions import InsufficientStock, StockError
 from stock.models import StockCount, StockLevel, StockMovement, StockOperation
 
 __all__ = [
-    'apply_movement', 'apply_movements', 'reverse_movement',
+    'apply_movement', 'apply_movements', 'reverse_movement', 'reverse_operation',
     'adjust_to_count', 'confirm_count', 'cancel_count',
 ]
 
@@ -26,8 +26,10 @@ def _lock_level(variant):
     return level
 
 
-def _new_operation(kind, reason, user, note='', stock_count=None):
-    return StockOperation.objects.create(kind=kind, reason=reason, note=note, stock_count=stock_count, created_by=user)
+def _new_operation(kind, reason, user, note='', stock_count=None, sale=None, exchange=None):
+    return StockOperation.objects.create(
+        kind=kind, reason=reason, note=note, stock_count=stock_count, sale=sale, exchange=exchange, created_by=user,
+    )
 
 
 def _write_movement(level, variant, operation, delta, user, reverses):
@@ -75,12 +77,13 @@ def apply_movement(variant, kind, delta, reason, user=None, note='', operation=N
         return _write_movement(level, variant, operation, delta, user, reverses)
 
 
-def apply_movements(lines, kind, reason, user=None, note=''):
+def apply_movements(lines, kind, reason, user=None, note='', sale=None, exchange=None):
     """
     Ingreso o egreso en lote, atómico: si una línea falla no se aplica ninguna.
     `lines` es una lista de `(variant, quantity)` con cantidad POSITIVA (el signo lo
     pone el tipo). Devuelve la `StockOperation` creada, con una línea por variante. Una variante no puede repetirse. Se procesa por id de variante para
-    que dos lotes concurrentes bloqueen en el mismo orden (sin deadlocks).
+    que dos lotes concurrentes bloqueen en el mismo orden (sin deadlocks). `sale` / `exchange`
+    (sólo los pasa el módulo de ventas) enlazan la operación con su documento.
     """
     if kind not in (StockMovement.INGRESO, StockMovement.EGRESO):
         raise StockError({'kind': 'Un lote sólo admite ingresos o egresos.'})
@@ -98,7 +101,7 @@ def apply_movements(lines, kind, reason, user=None, note=''):
 
     sign = 1 if kind == StockMovement.INGRESO else -1
     with transaction.atomic():
-        operation = _new_operation(kind, reason, user, note)
+        operation = _new_operation(kind, reason, user, note, sale=sale, exchange=exchange)
         for variant, quantity in sorted(lines, key=lambda line: line[0].pk):
             apply_movement(variant, kind, sign * quantity, reason, user=user, note=note, operation=operation)
         return operation
@@ -114,9 +117,11 @@ def reverse_movement(movement, user=None, note=''):
     """
     with transaction.atomic():
         # Se bloquea el original: dos anulaciones simultáneas se serializan.
-        movement = StockMovement.objects.select_for_update().select_related('variant').get(pk=movement.pk)
+        movement = StockMovement.objects.select_for_update().select_related('variant', 'operation').get(pk=movement.pk)
         if movement.kind == StockMovement.AJUSTE:
             raise StockError({'detail': 'Los ajustes no se anulan: corregilos con otro recuento.'})
+        if movement.operation.sale_id or movement.operation.exchange_id:
+            raise StockError({'detail': 'El movimiento pertenece a una venta o cambio: se anula desde ahí.'})
         if movement.reason == StockMovement.ANULACION:
             raise StockError({'detail': 'Una anulación no se puede anular.'})
         if StockMovement.objects.filter(reverses=movement).exists():
@@ -126,6 +131,42 @@ def reverse_movement(movement, user=None, note=''):
             movement.variant, kind, -movement.quantity, StockMovement.ANULACION,
             user=user, note=note, reverses=movement,
         )
+
+
+def reverse_operation(operation, user=None, note=''):
+    """
+    Anula una operación entera (ingreso o egreso): crea UNA operación inversa (motivo `anulacion`) con
+    el movimiento opuesto de cada línea, enlazado con `reverses`. Es atómico: si una línea no se puede
+    deshacer (`InsufficientStock`, ej. anular un ingreso cuyas unidades ya salieron) no se anula ninguna.
+    No se anulan operaciones de ajuste (recuentos), ni anulaciones, ni una operación ya anulada (total o
+    parcialmente). La anulación hereda el enlace a la venta o cambio de la operación original.
+    Devuelve la operación de anulación.
+    """
+    with transaction.atomic():
+        # Se bloquean las líneas por id de variante: mismo orden que los lotes, sin deadlocks.
+        movements = list(
+            StockMovement.objects.select_for_update().select_related('variant')
+            .filter(operation_id=operation.pk).order_by('variant_id')
+        )
+        if not movements:
+            raise StockError({'detail': 'La operación no tiene líneas para anular.'})
+        if any(m.kind == StockMovement.AJUSTE for m in movements):
+            raise StockError({'detail': 'Los ajustes no se anulan: corregilos con otro recuento.'})
+        if any(m.reason == StockMovement.ANULACION for m in movements):
+            raise StockError({'detail': 'Una anulación no se puede anular.'})
+        if StockMovement.objects.filter(reverses__in=movements).exists():
+            raise StockError({'detail': 'La operación ya fue anulada (total o parcialmente).'})
+        kind = StockMovement.EGRESO if movements[0].kind == StockMovement.INGRESO else StockMovement.INGRESO
+        reversal = StockOperation.objects.create(
+            kind=kind, reason=StockMovement.ANULACION, note=note, created_by=user,
+            sale_id=operation.sale_id, exchange_id=operation.exchange_id,
+        )
+        for m in movements:
+            apply_movement(
+                m.variant, kind, -m.quantity, StockMovement.ANULACION,
+                user=user, note=note, operation=reversal, reverses=m,
+            )
+        return reversal
 
 
 def adjust_to_count(variant, counted, operation, user=None):

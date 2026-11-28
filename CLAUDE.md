@@ -130,9 +130,13 @@ No linter/formatter is configured in this repo currently.
   error se corrige con `POST stock-movements/{id}/reverse/` (motivo `anulacion`; una sola vez; no se anulan anulaciones
   ni ajustes; anula una línea, no la operación entera). Motivos:
   ingreso `compra`/`cambio_entrada`/`stock_inicial`/`otro`; egreso `rotura_merma`/`perdida`/`uso_interno`/
-  `devolucion_proveedor`/`cambio_salida`/`otro`; ajuste `recuento`/`correccion`. El stock inicial se carga con un ingreso en
-  lote `stock_inicial`. No hay devoluciones de cliente; los cambios (`cambio_entrada`/`cambio_salida`) se registran como
-  ingreso + egreso hasta que exista el módulo de ventas (que los hará atómicos con `apply_movement` y sumará un FK al documento).
+  `devolucion_proveedor`/`cambio_salida`/`venta`/`otro`; ajuste `recuento`/`correccion`. `venta` y `anulacion` los genera el
+  sistema: `POST stock-operations/` los rechaza. El stock inicial se carga con un ingreso en lote `stock_inicial`. No hay
+  devoluciones de cliente; los cambios los hace el módulo `sales/` (atómicos, ver abajo).
+  `StockOperation.sale` / `.exchange` (FK nullable) enlazan la operación con su documento de ventas (filtros `?sale=`,
+  `?exchange=` en `stock-operations/`). Una línea de una operación de venta o cambio **no se anula suelta**
+  (`reverse_movement` responde 400: se anula desde la venta/cambio); `reverse_operation(operation)` anula una operación entera
+  en UNA operación `anulacion` (atómica; hereda el enlace a la venta/cambio) y es lo que usa `sales/`.
   No se mueve stock de una variante eliminada y no se elimina una variante con stock > 0
   (`ProductVariantViewSet.perform_destroy`; sólo en la API, no en el admin).
   Endpoints: `stock/` (grilla de variantes activas con `quantity`, `min_stock`, `is_low_stock` = `min_stock > 0` y
@@ -141,10 +145,47 @@ No linter/formatter is configured in this repo currently.
   Recuentos (`StockCount`, `BaseModel`): borrador → `confirm` o `cancel`; parcial (sólo se ajustan las variantes cargadas);
   `POST items/` hace upsert de una línea, `POST items/bulk/` de muchas a la vez (atómico; las no mencionadas quedan) y `DELETE items/{variant_id}/` quita una; al confirmar se calcula la diferencia con
   el saldo bloqueado (`system_quantity`, `difference`) y se crea un ajuste `recuento` sólo si hubo diferencia. Confirmado o
-  cancelado queda congelado; no se borra. Permisos (`stock/permissions.py::ActionPermission`, por acción, no un CRUD de
+  cancelado queda congelado; no se borra. Permisos (`core/permissions.py::ActionPermission`, por acción, no un CRUD de
   modelo): `view_stocklevel`, `view_stockmovement`, `add_stockmovement` (ingresar, egresar, anular), `view_stockcount`,
   `add_stockcount` (armar, confirmar y cancelar: no hay aprobación en dos pasos). Administrador todo; Vendedor sólo ver.
-  El admin es de sólo consulta.
+  El admin es de sólo consulta. `ActionPermission` vive en `core/permissions.py` (lo usan `stock/` y `sales/`).
+
+- `sales/` — ventas y cambios de un único local. Ni la venta ni el cambio se editan ni se borran: se **anulan** (no son
+  `BaseModel`; `status` `completada`/`anulada`, con `voided_at`/`voided_by`/`void_reason`; el motivo es obligatorio).
+  **El stock se toca sólo por `stock/services.py`**, desde `sales/services.py` (nunca a mano). Los endpoints son finos: la
+  lógica va en los servicios, que son atómicos y bloquean la fila de la venta (`select_for_update`) para que anular una venta,
+  anular un cambio y cambiar no corran a la vez.
+  `Sale` (`sales/`): cliente opcional (`clients.Client`, `PROTECT`), `payment_method` (`transferencia`, `efectivo`,
+  `tarjeta_credito`, `tarjeta_debito`, `qr`), `subtotal` (a precio de lista), `total` (lo cobrado), `discount_percent`/
+  `discount_reason`, `note` e `idempotency_key` opcional y única (reenviar la misma devuelve la venta ya registrada con 200).
+  `SaleItem`: variante + cantidad con el precio **congelado** al vender: `list_price` (`Product.get_current_price()`: promo si está
+  en rango, si no venta), `discount_percent`, `unit_price` (lo que pagó, redondeado al centavo), `subtotal` y `exchanged_quantity`.
+  **El precio nunca viaja en el POST.** Variante única por venta. Sólo se vende lo activo; sin stock → `InsufficientStock` (400,
+  mismo formato que stock) y no queda nada guardado. `create_sale` descuenta con `apply_movements(EGRESO, venta, sale=...)`;
+  `void_sale` devuelve el stock con `reverse_operation` y se bloquea si la venta tiene cambios activos (primero se anulan).
+  Descuento: sólo los valores de `settings.SALE_DISCOUNT_CHOICES` (hoy 0, 5, 10), a toda la venta, y con 5 o 10 exige
+  `sales.apply_discount` (403; hoy sólo Administrador). No hay descuento manual libre ni por ítem.
+  `Exchange`/`ExchangeItem` (`exchanges/`): cambio **sobre una venta** completada y dentro de `settings.EXCHANGE_WINDOW_DAYS` (30
+  días desde la fecha local de la venta, inclusive; sin excepciones por permiso). Cualquier producto admite cambio (no hay
+  `allows_exchange`: lo que no se cambie es regla de negocio fuera del sistema). Se devuelven ítems de ESA venta (`sale_item` +
+  cantidad, hasta `quantity − exchanged_quantity`; cambios parciales y sucesivos) y se lleva cualquier variante activa (puede
+  no llevarse nada), nunca la misma variante que devuelve. Valuación: lo devuelto vale lo que el cliente **pagó** (`unit_price`
+  de la venta, con su descuento); lo nuevo, el precio vigente hoy **sin descuento**. `difference = nuevo − devuelto`.
+  **No hay devoluciones de dinero**: `difference > 0` la paga el cliente (`payment_method` obligatorio); `0` o negativa no hay
+  pago (un `payment_method` enviado se ignora) y el valor no compensado queda en `unreturned_amount` (propiedad). Lo que se lleva
+  de un cambio no se vuelve a cambiar. Atómico: dos operaciones de stock enlazadas al cambio (ingreso `cambio_entrada` y egreso
+  `cambio_salida`); si falta stock de lo nuevo no queda nada. `void_exchange` deshace ambas y libera las unidades; falla (400) si
+  lo que había entrado ya se vendió. `POST exchanges/preview/` calcula `returned_total`, `new_total`, `difference` y
+  `unreturned_amount` sin guardar nada (mismas validaciones, y avisa si no hay stock de lo que se lleva).
+  Endpoints: `sales/` (listar/ver/crear, `POST {id}/void/`), `exchanges/` (listar/ver/crear, `POST preview/`, `POST {id}/void/`).
+  `GET sales/{id}/` trae `items` (con `exchangeable_quantity`), `exchanges` (resumen) y `can_exchange` (completada, en plazo y con
+  unidades por cambiar); el listado trae `items_count`/`units` (subconsultas: el buscador por SKU no los multiplica) y
+  `exchange_deadline`. Filtros de ventas: `client`, `status`, `payment_method`, `created_by`, `product`, `variant`, `has_discount`,
+  `has_exchanges` (sólo cambios activos), `min_total`, `max_total`, `date_from`/`date_to` (inclusivos, hora de Buenos Aires),
+  `search` (cliente, nota, SKU). Permisos por acción (`core/permissions.py::ActionPermission`): `view_sale`, `add_sale`,
+  `void_sale`, `apply_discount`, `view_exchange`, `add_exchange` (crear y preview), `void_exchange`. Vendedor: ver y crear
+  ventas y cambios; Administrador todo (anular y descontar). El admin es de sólo consulta. Guía de API para el front:
+  `docs/sales-brief.md` (contratos, pantallas y orden de implementación).
 
 - `core/media.py` — adaptador de almacenamiento de imágenes: `ImageStorage`
   (`upload`/`delete`/`url`) + `CloudinaryImageStorage`, elegido con `settings.IMAGE_STORAGE`
@@ -266,7 +307,7 @@ per-view (e.g. `health` uses `AllowAny`).
 All settings have defaults in `config/settings.py` except `SECRET_KEY`,
 `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`. `.env.template` lists only
 those (plus `DEBUG`); the rest (`ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`,
-`EMAIL_BACKEND`, `NUM_PROXIES` (poné 1 detrás de un proxy/LB, si no el throttling por IP no es confiable), `THROTTLE_RATE_*`, `JWT_*`, `SECURE_*`, `CSRF_TRUSTED_ORIGINS`) are optional overrides. Inside Docker, `DB_HOST` is overridden to `db` so
+`EMAIL_BACKEND`, `TIME_ZONE` (default `America/Argentina/Buenos_Aires`: los filtros de fecha y el plazo de cambio cuentan días locales), `EXCHANGE_WINDOW_DAYS` (30), `NUM_PROXIES` (poné 1 detrás de un proxy/LB, si no el throttling por IP no es confiable), `THROTTLE_RATE_*`, `JWT_*`, `SECURE_*`, `CSRF_TRUSTED_ORIGINS`) are optional overrides. Inside Docker, `DB_HOST` is overridden to `db` so
 the same `.env` works both locally and in Compose.
 
 ### Seguridad de tokens / docs
